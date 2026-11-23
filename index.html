@@ -123,6 +123,18 @@ button:disabled { opacity: .35; cursor: default; }
 .mtoast.toast { animation: toast 1.1s ease forwards; }
 .card { transition: border-color .2s, background .2s; }
 @media (prefers-reduced-motion: reduce) { .modal, .modal .mbox, .choose { transition: none; } .mstage.out-l, .mstage.out-r, .mstage.in-l, .mstage.in-r { animation: none; } }
+.sortwrap.c4 { grid-template-columns: 1fr 1fr 1fr 1fr; }
+.bin.b0 { border-style: solid; border-color: var(--vertex); } .bin.b0 h3 { color: var(--vertex); }
+.bin.b1 { border-style: solid; border-color: var(--face); } .bin.b1 h3 { color: var(--face); }
+.bin.b2 { border-style: solid; border-color: var(--muted); } .bin.b2 h3 { color: var(--muted); }
+.choose.b0 { color: var(--vertex); border-color: var(--vertex); } .choose.b1 { color: var(--face); border-color: var(--face); } .choose.b2 { color: var(--muted); border-color: var(--muted); }
+.choose.b0.sel, .choose.b0.flash { background: var(--vertex); color: #fff; } .choose.b1.sel, .choose.b1.flash { background: var(--face); color: #fff; } .choose.b2.sel, .choose.b2.flash { background: var(--muted); color: #fff; }
+.mtoast.b0 { background: var(--vertex); } .mtoast.b1 { background: var(--face); } .mtoast.b2 { background: var(--muted); }
+.sortnote { background: #eef6ff; border: 2px solid var(--edge); border-radius: 14px; padding: 10px 16px; font-size: clamp(17px, 1.6vw, 24px); }
+.sortnote b { font-weight: 700; }
+.term.on.face { border-color: var(--face); background: #fff3ea; } .term.on.edge { border-color: var(--edge); background: #eaf3fd; } .term.on.vertex { border-color: var(--vertex); background: #f1edfd; }
+button.cnt.on.vertex { background: var(--vertex); color: #fff; } button.cnt.on.edge { background: var(--edge); color: #fff; } button.cnt.on.face { background: var(--face); color: #fff; }
+@media (max-width: 1000px), (max-height: 560px) { .sortwrap.c4 { grid-template-columns: 1fr; } }
 /* 장면 2 */
 .sent { font-family: var(--display); font-size: clamp(26px, 2.8vw, 44px); line-height: 1.7; }
 .sent b { font-weight: 400; color: var(--edge); }
@@ -481,9 +493,16 @@ button.cnt.vertex { border-color: var(--vertex); color: var(--vertex); } button.
     var box = el('div', 'stage ' + (cls || ''), '<canvas></canvas><div class="hint">끌어서 돌려 보세요</div>');
     holder.appendChild(box);
     var S = { el: box, cv: box.querySelector('canvas'), yaw: 0.6, pitch: 0.42, spin: true }, drag = null;
-    box.addEventListener('pointerdown', function (e) { if (e.target.closest('button, input')) return; box.setPointerCapture(e.pointerId); drag = { x: e.clientX, y: e.clientY, yaw: S.yaw, pitch: S.pitch }; S.spin = false; });
-    box.addEventListener('pointermove', function (e) { if (!drag) return; S.yaw = drag.yaw + (e.clientX - drag.x) * 0.01; S.pitch = Math.max(-1.45, Math.min(1.45, drag.pitch + (e.clientY - drag.y) * 0.01)); });
-    box.addEventListener('pointerup', function () { drag = null; });
+    box.addEventListener('pointerdown', function (e) { if (e.target.closest('button, input')) return; box.setPointerCapture(e.pointerId); drag = { x: e.clientX, y: e.clientY, yaw: S.yaw, pitch: S.pitch, moved: false }; S.spin = false; });
+    box.addEventListener('pointermove', function (e) {
+      if (!drag) return;
+      if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 8) return;
+      drag.moved = true; S.yaw = drag.yaw + (e.clientX - drag.x) * 0.01; S.pitch = Math.max(-1.45, Math.min(1.45, drag.pitch + (e.clientY - drag.y) * 0.01));
+    });
+    box.addEventListener('pointerup', function (e) {   // 끌지 않고 살짝 누르면 onTap (면·모서리·꼭짓점 고르기)
+      var tap = drag && !drag.moved; drag = null;
+      if (tap && S.onTap) { var r = S.cv.getBoundingClientRect(); S.onTap(e.clientX - r.left, e.clientY - r.top); }
+    });
     box.addEventListener('pointercancel', function () { drag = null; });
     S.reset = function (p) { S.yaw = 0.6; S.pitch = p === undefined ? 0.42 : p; S.spin = true; };
     S.tick = function (dt) { if (S.spin) S.yaw += dt * 0.00045; return fit(S.cv); };
@@ -514,12 +533,19 @@ button.cnt.vertex { border-color: var(--vertex); color: var(--vertex); } button.
     L.sort(function (p, q) { return p[0] - q[0] || p[1] - q[1]; });
     return L.map(function (x) { return x[2]; });
   }
-  function Counter(onDone) {
-    var C = { mode: null, ids: [], t0: 0, done: true };
-    C.start = function (M, mode) { C.mode = mode; C.ids = orderOf(M, mode); C.t0 = performance.now(); C.done = false; C.step = Math.max(160, Math.min(420, 4800 / C.ids.length)); };
-    C.clear = function () { C.mode = null; C.ids = []; C.done = true; };
+  function Counter(onDone, onChange) {
+    var C = { mode: null, ids: [], t0: 0, done: true, manualOn: false };
+    C.start = function (M, mode) { C.manualOn = false; C.mode = mode; C.ids = orderOf(M, mode); C.t0 = performance.now(); C.done = false; C.step = Math.max(160, Math.min(420, 4800 / C.ids.length)); };
+    C.manual = function (mode) { C.manualOn = true; C.mode = mode; C.ids = []; C.done = true; };
+    C.toggle = function (id) {
+      if (!C.manualOn) return;
+      var i = C.ids.indexOf(id); if (i >= 0) C.ids.splice(i, 1); else C.ids.push(id);
+      if (onChange) onChange(C.mode, C.ids.length);
+    };
+    C.clear = function () { C.mode = null; C.ids = []; C.done = true; C.manualOn = false; };
     C.shown = function () {
       if (!C.mode) return [];
+      if (C.manualOn) return C.ids;
       var k = Math.min(C.ids.length, Math.floor((performance.now() - C.t0) / C.step) + 1);
       if (k >= C.ids.length && !C.done) { C.done = true; if (onDone) onDone(C.mode, C.ids.length); }
       return C.ids.slice(0, k);
@@ -574,6 +600,35 @@ button.cnt.vertex { border-color: var(--vertex); color: var(--vertex); } button.
       ctx.fillStyle = col.btnfg; ctx.fillText(String(k + 1), x, y + 1);
     });
   }
+  // 화면의 (x, y)에 있는 면·모서리·꼭짓점 찾기 (drawCount와 같은 투영)
+  function pickAt(cv, M, yaw, pitch, frac, mode, x, y) {
+    prep(M);
+    var W = cv._w, H = cv._h, cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch), sc = Math.min(W, H) * frac / M.R, ox = W / 2, oy = H / 2;
+    function rot(a, b, c) { var x1 = a * cy + c * sy, z1 = -a * sy + c * cy; return [x1, b * cp - z1 * sp, b * sp + z1 * cp]; }
+    var P = M.V.map(function (v) { var r = rot(v[0] - M.c[0], v[1] - M.c[1], v[2] - M.c[2]); return { x: ox + r[0] * sc, y: oy - r[1] * sc }; });
+    var front = M.N.map(function (n) { return rot(n[0], n[1], n[2])[2] > 0; }), best = -1, bd = 1e9, i;
+    if (mode === 'face') {
+      for (i = 0; i < M.F.length; i++) {
+        if (!front[i]) continue;
+        var f = M.F[i], inside = false;
+        for (var k = 0, j = f.length - 1; k < f.length; j = k++) { var p = P[f[k]], q = P[f[j]]; if ((p.y > y) !== (q.y > y) && x < (q.x - p.x) * (y - p.y) / (q.y - p.y) + p.x) inside = !inside; }
+        if (inside) return i;
+      }
+    } else if (mode === 'edge') {
+      M.E.forEach(function (e, ei) {
+        var a = P[e.a], b = P[e.b], dx = b.x - a.x, dy = b.y - a.y, t = Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / (dx * dx + dy * dy || 1)));
+        var dist = Math.hypot(a.x + t * dx - x, a.y + t * dy - y), hidden = !e.f.some(function (g) { return front[g]; }), s = dist + (hidden ? 10 : 0);
+        if (dist < 22 && s < bd) { bd = s; best = ei; }
+      });
+    } else {
+      M.V.forEach(function (v, vi) {
+        var dist = Math.hypot(P[vi].x - x, P[vi].y - y), hidden = !M.VF[vi].some(function (g) { return front[g]; }), s = dist + (hidden ? 12 : 0);
+        if (dist < 28 && s < bd) { bd = s; best = vi; }
+      });
+    }
+    return best;
+  }
+  function totalOf(M, mode) { return mode === 'face' ? M.F.length : mode === 'edge' ? M.E.length : M.V.length; }
   function solid(kind, n) {   // kind: prism / pyramid / frustum
     var m = kind === 'prism' ? extrude(regular(n, 1), 1.4) : kind === 'pyramid' ? extrude(regular(n, 1), 1.6, { top: 0 }) : extrude(regular(n, 1), 1.2, { top: 0.5 });
     return finish(m);
@@ -595,151 +650,168 @@ button.cnt.vertex { border-color: var(--vertex); color: var(--vertex); } button.
     var M = finish({ V: V, F: F, open: true, box: true }); M.tint = tint; M.noEdge = noEdge; M.c = base.c; M.R = base.R; return M;
   }
 
-  // ================= 장면 1: 다면체일까, 아닐까? (분류하기) =================
-  // 카드를 누르면 크게 보고 "다면체다/아니다"를 골라 상자로 보낸다. 끌어서 옮길 수도 있다. 그다음 정답 공개.
-  var GUESS12 = ['cube', 'cylinder', 'sqPyr', 'halfCyl', 'triPrism', 'sphere', 'octa', 'openBox', 'hexPrism', 'cone', 'lPrism', 'plane5'];
-  function sceneGuess(main) {
-    var head = el('div', 'scene-head', '<h2>다면체일까, 아닐까? 골라서 나눠 보세요</h2>');
+  // ================= 분류 장면 (장면 1, 장면 4) =================
+  // 카드를 누르면 크게 보고 상자를 고른다 → 바로 다음 도형. 끌어서 옮길 수도 있다. 그다음 정답 공개.
+  function sortScene(main, cfg) {
+    var head = el('div', 'scene-head', '<h2>' + cfg.title + '</h2>');
     var tools = el('div', 'tools'), bRev = el('button', 'primary', '정답 공개'), bFix = el('button', '', '정답대로 정리'), bReset = el('button', '', '처음부터');
     tools.appendChild(bRev); tools.appendChild(bFix); tools.appendChild(bReset); head.appendChild(tools); main.appendChild(head);
-    var wrap = el('div', 'sortwrap'); main.appendChild(wrap);
-    function bin(cls, title) {
-      var b = el('div', 'bin ' + cls, '<h3>' + title + ' <span class="cnt"></span></h3><div class="cards"></div>');
-      wrap.appendChild(b); return b;
-    }
-    var pool = bin('pool', '아직 안 나눈 도형'), yes = bin('yes', '다면체예요 ○'), no = bin('no', '다면체가 아니에요 ✕');
+    var note = el('div', 'sortnote'); note.hidden = true; if (cfg.note) { note.innerHTML = cfg.note; main.appendChild(note); }
+    var wrap = el('div', 'sortwrap c' + (cfg.bins.length + 1)); main.appendChild(wrap);
+    var BINS = {};
+    function bin(id, cls, title) { var b = el('div', 'bin ' + cls, '<h3>' + title + ' <span class="cnt"></span></h3><div class="cards"></div>'); wrap.appendChild(b); BINS[id] = b; return b; }
+    bin('pool', 'pool', '아직 안 나눈 도형');
+    cfg.bins.forEach(function (b) { bin(b.id, b.cls, b.title); });
     var st = { revealed: false, modal: null };
-    var cards = GUESS12.map(function (key, k) {
+    var cards = cfg.items.map(function (it, k) {
       var c = el('div', 'card', '<canvas></canvas><span class="num">' + (k + 1) + '</span><span class="mark"></span><span class="nm"></span>');
       c.setAttribute('role', 'button'); c.setAttribute('aria-label', (k + 1) + '번 도형'); c.tabIndex = 0;
-      pool.querySelector('.cards').appendChild(c);
-      var C = { el: c, cv: c.querySelector('canvas'), key: key, k: k, yaw: 0.3 + k * 0.9, pitch: mesh(key).box ? 0.85 : mesh(key).open ? 0.6 : 0.38, at: 'pool' };
-      // 누르면 크게 보기, 끌면 옮기기
+      BINS.pool.querySelector('.cards').appendChild(c);
+      var M = it.M();
+      var C = { el: c, cv: c.querySelector('canvas'), it: it, M: M, k: k, yaw: 0.3 + k * 0.9, pitch: M.box ? 0.85 : M.open ? 0.6 : 0.38, at: 'pool' };
       var drag = null;
       c.addEventListener('pointerdown', function (e) { if (e.button) return; c.setPointerCapture(e.pointerId); var r = c.getBoundingClientRect(); drag = { x: e.clientX, y: e.clientY, dx: e.clientX - r.left, dy: e.clientY - r.top, w: r.width, h: r.height, moving: false }; });
       c.addEventListener('pointermove', function (e) {
         if (!drag) return;
-        if (!drag.moving) {
-          if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 8) return;
-          drag.moving = true; c.classList.add('dragging'); c.style.width = drag.w + 'px'; c.style.height = drag.h + 'px';
-        }
+        if (!drag.moving) { if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 8) return; drag.moving = true; c.classList.add('dragging'); c.style.width = drag.w + 'px'; c.style.height = drag.h + 'px'; }
         c.style.left = (e.clientX - drag.dx) + 'px'; c.style.top = (e.clientY - drag.dy) + 'px';
-        var t = dropTarget(e.clientX, e.clientY); [pool, yes, no].forEach(function (b) { b.classList.toggle('over', b === t); });
+        var t = dropTarget(e.clientX, e.clientY); Object.keys(BINS).forEach(function (id) { BINS[id].classList.toggle('over', BINS[id] === t); });
       });
+      function endDrag() { c.classList.remove('dragging'); c.style.left = c.style.top = c.style.width = c.style.height = ''; Object.keys(BINS).forEach(function (id) { BINS[id].classList.remove('over'); }); }
       c.addEventListener('pointerup', function (e) {
         if (!drag) return; var was = drag.moving; drag = null;
         if (!was) { openModal(C); return; }
-        var t = dropTarget(e.clientX, e.clientY);
-        c.classList.remove('dragging'); c.style.left = c.style.top = c.style.width = c.style.height = '';
-        [pool, yes, no].forEach(function (b) { b.classList.remove('over'); });
-        if (t) move(C, t === yes ? 'yes' : t === no ? 'no' : 'pool');
+        var t = dropTarget(e.clientX, e.clientY); endDrag();
+        if (t) { var id = Object.keys(BINS).filter(function (x) { return BINS[x] === t; })[0]; move(C, id); }
       });
-      c.addEventListener('pointercancel', function () { drag = null; c.classList.remove('dragging'); c.style.left = c.style.top = c.style.width = c.style.height = ''; });
+      c.addEventListener('pointercancel', function () { drag = null; endDrag(); });
       c.addEventListener('keydown', function (e) { if (e.key === 'Enter') openModal(C); });
       return C;
     });
     function dropTarget(x, y) { var hit = document.elementFromPoint(x, y); return hit && hit.closest ? hit.closest('.bin') : null; }
-    function move(C, where) {
-      C.at = where; (where === 'yes' ? yes : where === 'no' ? no : pool).querySelector('.cards').appendChild(C.el);
-      anim(C.el, 'pop'); refresh();
-    }
+    function move(C, where) { C.at = where; BINS[where].querySelector('.cards').appendChild(C.el); anim(C.el, 'pop'); refresh(); }
     function refresh() {
-      [[pool, 'pool'], [yes, 'yes'], [no, 'no']].forEach(function (b) { b[0].querySelector('.cnt').textContent = '(' + cards.filter(function (C) { return C.at === b[1]; }).length + ')'; });
+      Object.keys(BINS).forEach(function (id) { BINS[id].querySelector('.cnt').textContent = '(' + cards.filter(function (C) { return C.at === id; }).length + ')'; });
       cards.forEach(function (C) {
-        var poly = SH[C.key][1], right = C.at === 'pool' ? null : (C.at === 'yes') === poly;
+        var right = C.at === 'pool' ? null : C.at === C.it.ans;
         C.el.classList.toggle('right', st.revealed && right === true);
         C.el.classList.toggle('wrong', st.revealed && right === false);
         C.el.querySelector('.mark').textContent = st.revealed && right !== null ? (right ? '○' : '✕') : '';
-        C.el.querySelector('.nm').textContent = st.revealed ? SH[C.key][0] : '';
+        C.el.querySelector('.nm').textContent = st.revealed ? C.it.name : '';
       });
       bRev.textContent = st.revealed ? '정답 가리기' : '정답 공개';
+      note.hidden = !st.revealed;
     }
-    bRev.onclick = function () {
-      st.revealed = !st.revealed; refresh();
-      if (st.revealed) cards.forEach(function (C) { if (C.el.classList.contains('wrong')) anim(C.el, 'shake'); });
-    };
-    bFix.onclick = function () { st.revealed = true; cards.forEach(function (C) { var w = SH[C.key][1] ? 'yes' : 'no'; if (C.at !== w) move(C, w); }); refresh(); };
-    bReset.onclick = function () { st.revealed = false; cards.forEach(function (C) { C.at = 'pool'; pool.querySelector('.cards').appendChild(C.el); }); refresh(); };
+    bRev.onclick = function () { st.revealed = !st.revealed; refresh(); if (st.revealed) cards.forEach(function (C) { if (C.el.classList.contains('wrong')) anim(C.el, 'shake'); }); };
+    bFix.onclick = function () { st.revealed = true; cards.forEach(function (C) { if (C.at !== C.it.ans) move(C, C.it.ans); }); refresh(); };
+    bReset.onclick = function () { st.revealed = false; cards.forEach(function (C) { C.at = 'pool'; BINS.pool.querySelector('.cards').appendChild(C.el); }); refresh(); };
 
     // 크게 보기 창
     var modal = el('div', 'modal', '<div class="mbox"><div class="mhead"><h3></h3><button class="mprev" aria-label="이전 도형">◀</button><button class="mnext" aria-label="다음 도형">▶</button><button class="mclose" aria-label="닫기">✕ 닫기</button></div><div class="mstage"></div><div class="mbtns"></div></div>');
     modal.hidden = true; main.appendChild(modal);
     var MS = Stage(modal.querySelector('.mstage')), mStamp = MS.add('stamp'), mBall = el('button', 'corner', '공 넣어 보기 ⚽'); MS.el.appendChild(mBall);
-    var bY = el('button', 'choose yes', '다면체다 ○ <kbd>O</kbd>'), bN = el('button', 'choose no', '다면체가 아니다 ✕ <kbd>X</kbd>');
-    modal.querySelector('.mbtns').appendChild(bY); modal.querySelector('.mbtns').appendChild(bN);
+    var chooseBtns = cfg.bins.map(function (b) {
+      var btn = el('button', 'choose ' + b.cls, b.btn + ' <kbd>' + b.keys[0].toUpperCase() + '</kbd>'); btn.dataset.id = b.id;
+      btn.onclick = function () { choose(b.id); }; modal.querySelector('.mbtns').appendChild(btn); return btn;
+    });
     var mStageBox = modal.querySelector('.mstage'), mToast = el('div', 'mtoast'); modal.querySelector('.mbox').appendChild(mToast);
-    function fill(C) {   // 창 안의 내용만 바꾼다
+    function binOf(id) { return cfg.bins.filter(function (b) { return b.id === id; })[0]; }
+    function fill(C) {
       st.modal = C; st.ball = null;
       var left = cards.filter(function (x) { return x.at === 'pool'; }).length;
-      modal.querySelector('h3').innerHTML = (C.k + 1) + '번 도형' + (st.revealed ? ' · ' + SH[C.key][0] : '') + ' <small>남은 도형 ' + left + '개</small>';
-      MS.reset(C.pitch); MS.el.querySelector('.hint').hidden = !!mesh(C.key).box;
-      mBall.hidden = !mesh(C.key).box; mBall.textContent = '공 넣어 보기 ⚽';
-      var poly = SH[C.key][1];
-      mStamp.className = st.revealed ? 'stamp ' + (poly ? 'yes' : 'no') : 'stamp'; mStamp.textContent = st.revealed ? (poly ? '다면체 ○' : '다면체가 아니에요 ✕') : '';
-      bY.classList.toggle('sel', C.at === 'yes'); bN.classList.toggle('sel', C.at === 'no');
+      modal.querySelector('h3').innerHTML = (C.k + 1) + '번 도형' + (st.revealed ? ' · ' + C.it.name : '') + ' <small>남은 도형 ' + left + '개</small>';
+      MS.reset(C.pitch); MS.el.querySelector('.hint').hidden = !!C.M.box;
+      mBall.hidden = !C.M.box; mBall.textContent = '공 넣어 보기 ⚽';
+      var ab = binOf(C.it.ans);
+      mStamp.className = st.revealed ? 'stamp ' + (ab.cls === 'no' || ab.cls === 'b2' ? 'no' : 'yes') : 'stamp'; mStamp.textContent = st.revealed ? ab.stamp : '';
+      chooseBtns.forEach(function (b) { b.classList.toggle('sel', C.at === b.dataset.id); });
     }
-    function openModal(C) {
-      fill(C); modal.hidden = false; void modal.offsetWidth; modal.classList.add('show');
-    }
-    function closeModal() {
-      if (modal.hidden) return;
-      modal.classList.remove('show'); st.modal = null;
-      setTimeout(function () { if (!modal.classList.contains('show')) modal.hidden = true; }, 220);
-    }
-    // 다음 도형: 지금 도형 뒤에서 아직 안 나눈 것부터, 없으면 앞에서
+    function openModal(C) { fill(C); modal.hidden = false; void modal.offsetWidth; modal.classList.add('show'); }
+    function closeModal() { if (modal.hidden) return; modal.classList.remove('show'); st.modal = null; setTimeout(function () { if (!modal.classList.contains('show')) modal.hidden = true; }, 220); }
     function nextOf(C, dir, onlyPool) {
-      for (var s2 = 1; s2 <= cards.length; s2++) {
-        var x = cards[(C.k + dir * s2 + cards.length * 2) % cards.length];
-        if (!onlyPool || x.at === 'pool') return x;
-      }
+      for (var s2 = 1; s2 <= cards.length; s2++) { var x = cards[(C.k + dir * s2 + cards.length * 2) % cards.length]; if (!onlyPool || x.at === 'pool') return x; }
       return null;
     }
     var busy = false;
-    function slideTo(C, dir) {   // 도형을 옆으로 밀어내고 다음 도형을 들여온다
+    function slideTo(C, dir) {
       if (busy) return; busy = true;
       mStageBox.classList.remove('in-l', 'in-r'); mStageBox.classList.add(dir > 0 ? 'out-l' : 'out-r');
-      setTimeout(function () {
-        fill(C); mStageBox.classList.remove('out-l', 'out-r'); void mStageBox.offsetWidth; mStageBox.classList.add(dir > 0 ? 'in-r' : 'in-l');
-        busy = false;
-      }, 170);
+      setTimeout(function () { fill(C); mStageBox.classList.remove('out-l', 'out-r'); void mStageBox.offsetWidth; mStageBox.classList.add(dir > 0 ? 'in-r' : 'in-l'); busy = false; }, 170);
     }
-    function choose(where) {
+    function choose(id) {
       var C = st.modal; if (!C || busy) return;
-      (where === 'yes' ? bY : bN).classList.add('flash');
-      setTimeout(function () { bY.classList.remove('flash'); bN.classList.remove('flash'); }, 300);
-      move(C, where);
-      mToast.textContent = (C.k + 1) + '번 → ' + (where === 'yes' ? '다면체예요 ○' : '다면체가 아니에요 ✕');
-      mToast.className = 'mtoast ' + where; anim(mToast, 'toast');
+      var btn = chooseBtns.filter(function (b) { return b.dataset.id === id; })[0];
+      btn.classList.add('flash'); setTimeout(function () { btn.classList.remove('flash'); }, 300);
+      move(C, id);
+      var b = binOf(id); mToast.textContent = (C.k + 1) + '번 → ' + b.title; mToast.className = 'mtoast ' + b.cls; anim(mToast, 'toast');
       var nx = nextOf(C, 1, true);
       if (nx) slideTo(nx, 1); else setTimeout(closeModal, 350);
     }
-    bY.onclick = function () { choose('yes'); };
-    bN.onclick = function () { choose('no'); };
     mBall.onclick = function () { st.ball = performance.now(); mBall.textContent = '다시 넣기 ⚽'; };
     modal.querySelector('.mclose').onclick = closeModal;
     modal.querySelector('.mprev').onclick = function () { if (st.modal) slideTo(nextOf(st.modal, -1, false), -1); };
     modal.querySelector('.mnext').onclick = function () { if (st.modal) slideTo(nextOf(st.modal, 1, false), 1); };
     modal.addEventListener('pointerdown', function (e) { if (e.target === modal) closeModal(); });
-    // 창이 열려 있을 때: O/X 고르기, ← → 도형 넘기기, Esc 닫기
     function onKey(e) {
       if (!st.modal) return;
       var k = e.key.toLowerCase();
-      if (k === 'escape') closeModal();
-      else if (k === 'o' || k === '1') choose('yes');
-      else if (k === 'x' || k === '2') choose('no');
-      else if (k === 'arrowright' || k === 'pagedown') { e.preventDefault(); modal.querySelector('.mnext').onclick(); }
-      else if (k === 'arrowleft' || k === 'pageup') { e.preventDefault(); modal.querySelector('.mprev').onclick(); }
+      if (k === 'escape') return closeModal();
+      if (k === 'arrowright' || k === 'pagedown') { e.preventDefault(); return modal.querySelector('.mnext').onclick(); }
+      if (k === 'arrowleft' || k === 'pageup') { e.preventDefault(); return modal.querySelector('.mprev').onclick(); }
+      cfg.bins.forEach(function (b) { if (b.keys.indexOf(k) >= 0) choose(b.id); });
     }
     document.addEventListener('keydown', onKey);
     refresh();
     return {
       frame: function (dt, col) {
-        cards.forEach(function (C) { if (!C.el.classList.contains('dragging')) C.yaw += dt * 0.00035; if (fit(C.cv)) render(C.cv, mesh(C.key), C.yaw, C.pitch, 0.4, 2, col); });
-        if (st.modal && MS.tick(dt)) render(MS.cv, st.ball ? ballMesh(mesh(st.modal.key), st.ball) : mesh(st.modal.key), MS.yaw, MS.pitch, 0.42, 3, col);
+        cards.forEach(function (C) { if (!C.el.classList.contains('dragging')) C.yaw += dt * 0.00035; if (fit(C.cv)) render(C.cv, C.M, C.yaw, C.pitch, 0.4, 2, col); });
+        if (st.modal && MS.tick(dt)) render(MS.cv, st.ball ? ballMesh(st.modal.M, st.ball) : st.modal.M, MS.yaw, MS.pitch, 0.42, 3, col);
       },
       primary: function () { if (st.modal) return; bRev.onclick(); },
       unmount: function () { document.removeEventListener('keydown', onKey); }
     };
+  }
+
+  // ---- 장면 1: 다면체일까, 아닐까? ----
+  var GUESS12 = ['cube', 'cylinder', 'sqPyr', 'halfCyl', 'triPrism', 'sphere', 'octa', 'openBox', 'hexPrism', 'cone', 'lPrism', 'plane5'];
+  function sceneGuess(main) {
+    return sortScene(main, {
+      title: '다면체일까, 아닐까? 골라서 나눠 보세요',
+      items: GUESS12.map(function (k) { return { name: SH[k][0], ans: SH[k][1] ? 'yes' : 'no', M: function () { return mesh(k); } }; }),
+      bins: [
+        { id: 'yes', cls: 'yes', title: '다면체예요 ○', btn: '다면체다 ○', keys: ['o', '1'], stamp: '다면체 ○' },
+        { id: 'no', cls: 'no', title: '다면체가 아니에요 ✕', btn: '다면체가 아니다 ✕', keys: ['x', '2'], stamp: '다면체가 아니에요 ✕' }
+      ]
+    });
+  }
+
+  // ---- 장면 4: 각기둥과 각뿔로 나눠 보기 (초등에서 배운 것) → 남은 도형 소개 ----
+  function ex(n, r, h, o) { return function () { return finish(extrude(regular(n, r), h, o)); }; }
+  var SORT_PP = [
+    { name: '사각뿔', ans: 'pyr', M: ex(4, 1, 1.6, { top: 0 }) },
+    { name: '삼각기둥', ans: 'prism', M: ex(3, 1, 1.5) },
+    { name: '사각뿔대', ans: 'etc', M: ex(4, 1, 1.2, { top: 0.5 }) },
+    { name: '오각기둥', ans: 'prism', M: ex(5, 1, 1.4) },
+    { name: '삼각뿔', ans: 'pyr', M: ex(3, 1.1, 1.6, { top: 0 }) },
+    { name: '팔면체', ans: 'etc', M: function () { return finish(G_octa()); } },
+    { name: '직육면체', ans: 'prism', M: function () { return finish(extrude([[-1.3, -0.8], [1.3, -0.8], [1.3, 0.8], [-1.3, 0.8]], 0.9)); } },
+    { name: '오각뿔', ans: 'pyr', M: ex(5, 1, 1.5, { top: 0 }) },
+    { name: '삼각뿔대', ans: 'etc', M: ex(3, 1.1, 1.1, { top: 0.45 }) },
+    { name: '누운 육각기둥', ans: 'prism', M: function () { return finish(lay(extrude(regular(6, 0.9), 1.8))); } },
+    { name: '육각뿔', ans: 'pyr', M: ex(6, 1, 1.3, { top: 0 }) },
+    { name: '오각뿔대', ans: 'etc', M: ex(5, 1, 1.1, { top: 0.55 }) }
+  ];
+  function scenePrismPyramid(main) {
+    return sortScene(main, {
+      title: '초등학교에서 배운 각기둥과 각뿔로 나눠 볼까요?',
+      items: SORT_PP,
+      note: '<b>남은 도형</b> 중 사각뿔대 · 삼각뿔대 · 오각뿔대는 <b>윗면과 아랫면이 평행</b>하고 옆면이 사다리꼴이에요. 이런 다면체를 <b class="c-edge">각뿔대</b>라고 해요. → 다음 장면에서 각뿔을 잘라 만들어 봐요.',
+      bins: [
+        { id: 'prism', cls: 'b0', title: '각기둥', btn: '각기둥', keys: ['1'], stamp: '각기둥' },
+        { id: 'pyr', cls: 'b1', title: '각뿔', btn: '각뿔', keys: ['2'], stamp: '각뿔' },
+        { id: 'etc', cls: 'b2', title: '둘 다 아니에요', btn: '둘 다 아니다', keys: ['3'], stamp: '각기둥도 각뿔도 아니에요' }
+      ]
+    });
   }
 
   // ================= 장면 2: 다면체의 뜻 만들기 =================
@@ -807,19 +879,21 @@ button.cnt.vertex { border-color: var(--vertex); color: var(--vertex); } button.
     var S = Stage(two), big = S.add('big'), tag = S.add('tag');
     var panel = el('div', 'panel'); two.appendChild(panel);
     var st = { k: 3, M: null, seen: {} };
-    var C = Counter(function (mode, n) {
-      big.innerHTML = '면 <b>' + n + '</b>개 → <b class="c-face">' + HANJA[n] + '면체</b>'; anim(big, 'pop');
-      (st.seen[n] = st.seen[n] || {})[NAMING[st.k][0]] = 1; table();
+    function result(n) { big.innerHTML = '면 <b>' + n + '</b>개 → <b class="c-face">' + HANJA[n] + '면체</b>'; anim(big, 'pop'); (st.seen[n] = st.seen[n] || {})[NAMING[st.k][0]] = 1; table(); }
+    var C = Counter(function (mode, n) { result(n); }, function (mode, n) {
+      if (n === st.M.F.length) result(n); else big.innerHTML = '면 <b>' + n + '</b>개';
     });
-    var picks = el('div', 'picks'); panel.appendChild(el('p', 'lead', '도형을 고르고 면을 세어 보세요.')); panel.appendChild(picks);
+    S.onTap = function (x, y) { var id = pickAt(S.cv, st.M, S.yaw, S.pitch, 0.4, 'face', x, y); if (id >= 0) { S.spin = false; C.toggle(id); } };
+    var picks = el('div', 'picks'); panel.appendChild(el('p', 'lead', '도형의 <b class="c-face">면을 직접 눌러</b> 불을 켜 보세요. 끌면 돌아가요. 다 세면 이름이 나와요.')); panel.appendChild(picks);
     NAMING.forEach(function (x, k) { var b = el('button', 'pick', x[0]); b.dataset.k = k; picks.appendChild(b); });
     picks.addEventListener('click', function (e) { var b = e.target.closest('button'); if (b) load(Number(b.dataset.k)); });
-    var go = el('button', 'primary wide', '면 세기 ▶'); panel.appendChild(go);
+    var grow = el('div', 'row'), go = el('button', '', '자동으로 세기 ▶'), again = el('button', '', '다시 세기');
+    grow.appendChild(again); grow.appendChild(go); panel.appendChild(grow);
     var tbl = el('div', 'sumtab'); panel.appendChild(tbl);
     var q = el('details', 'qcard', '<summary>생각해 보기: 삼면체는 있을까요?</summary><p>면이 3개로는 공간을 빈틈없이 둘러쌀 수 없어요. 그래서 면의 개수가 가장 적은 다면체는 <b>사면체</b>예요.</p>');
     panel.appendChild(q);
     function load(k) {
-      st.k = k; st.M = NAMING[k][1](); C.clear(); big.innerHTML = ''; tag.textContent = NAMING[k][0]; S.reset();
+      st.k = k; st.M = NAMING[k][1](); C.manual('face'); big.innerHTML = '면 <b>0</b>개'; tag.textContent = NAMING[k][0]; S.reset();
       Array.prototype.forEach.call(picks.children, function (b, i) { b.classList.toggle('sel', i === k); });
     }
     function table() {
@@ -829,6 +903,7 @@ button.cnt.vertex { border-color: var(--vertex); color: var(--vertex); } button.
       }).join('') + '</table>' : '';
     }
     go.onclick = function () { big.innerHTML = ''; C.start(st.M, 'face'); };
+    again.onclick = function () { C.manual('face'); big.innerHTML = '면 <b>0</b>개'; };
     load(3);
     return {
       frame: function (dt, col) { if (S.tick(dt)) drawCount(S.cv, st.M, S.yaw, S.pitch, 0.4, C.mode, C.shown(), col); },
@@ -926,23 +1001,29 @@ button.cnt.vertex { border-color: var(--vertex); color: var(--vertex); } button.
     var S = Stage(two), big = S.add('big'), tag = S.add('tag');
     var panel = el('div', 'panel'); two.appendChild(panel);
     var st = { k: 0, M: null };
-    var C = Counter(function (mode, n) { big.innerHTML = '<span class="c-' + mode + '">' + WORD[mode] + '</span> <b>' + n + '</b>개'; anim(big, 'pop'); });
+    function say6(mode, n, done) { big.innerHTML = '<span class="c-' + mode + '">' + WORD[mode] + '</span> <b>' + n + '</b>개' + (done ? ' ✓' : ''); if (done) anim(big, 'pop'); }
+    var C = Counter(function (mode, n) { say6(mode, n, true); }, function (mode, n) { say6(mode, n, n === totalOf(st.M, mode)); });
+    S.onTap = function (x, y) { if (!C.manualOn) return; var id = pickAt(S.cv, st.M, S.yaw, S.pitch, 0.4, C.mode, x, y); if (id >= 0) { S.spin = false; C.toggle(id); } };
     var picks = el('div', 'row'); TERM_SHAPES.forEach(function (x, k) { var b = el('button', 'pick mini', x[0]); b.onclick = function () { load(k); }; picks.appendChild(b); }); panel.appendChild(picks);
     var defs = el('div', 'terms');
     defs.innerHTML = [['face', '면', '다면체를 둘러싸고 있는 <b>다각형</b>'], ['edge', '모서리', '다각형의 <b>변</b>'], ['vertex', '꼭짓점', '다각형의 <b>꼭짓점</b>']].map(function (t) {
       return '<button class="term ' + t[0] + '" data-m="' + t[0] + '"><span class="tw c-' + t[0] + '">' + t[1] + '</span><span class="td">' + t[2] + '</span></button>';
     }).join('');
-    panel.appendChild(el('p', 'lead', '누르면 하나씩 불이 들어오며 세어져요.')); panel.appendChild(defs);
-    defs.addEventListener('click', function (e) { var b = e.target.closest('.term'); if (b) { big.innerHTML = ''; C.start(st.M, b.dataset.m); } });
+    panel.appendChild(el('p', 'lead', '세고 싶은 것을 고른 뒤, 도형에서 <b>직접 눌러</b> 불을 켜 보세요.')); panel.appendChild(defs);
+    var arow = el('div', 'row'), bAuto = el('button', '', '자동으로 세기 ▶'), bAgain = el('button', '', '다시 세기'); arow.appendChild(bAgain); arow.appendChild(bAuto); panel.appendChild(arow);
+    function pickMode(m) { C.manual(m); say6(m, 0, false); Array.prototype.forEach.call(defs.children, function (b) { b.classList.toggle('on', b.dataset.m === m); }); S.spin = false; }
+    defs.addEventListener('click', function (e) { var b = e.target.closest('.term'); if (b) pickMode(b.dataset.m); });
+    bAuto.onclick = function () { var m = C.mode || 'face'; big.innerHTML = ''; C.start(st.M, m); };
+    bAgain.onclick = function () { pickMode(C.mode || 'face'); };
     function load(k) {
-      st.k = k; var x = TERM_SHAPES[k]; st.M = solid(x[1], x[2]); C.clear(); big.innerHTML = ''; tag.textContent = x[0]; S.reset();
+      st.k = k; var x = TERM_SHAPES[k]; st.M = solid(x[1], x[2]); var m = C.mode || 'face'; tag.textContent = x[0]; S.reset(); pickMode(m);
       Array.prototype.forEach.call(picks.children, function (b, i) { b.classList.toggle('sel', i === k); });
     }
     load(0);
     var seq = ['face', 'edge', 'vertex'];
     return {
       frame: function (dt, col) { if (S.tick(dt)) drawCount(S.cv, st.M, S.yaw, S.pitch, 0.4, C.mode, C.shown(), col); },
-      primary: function () { var i = seq.indexOf(C.mode); big.innerHTML = ''; C.start(st.M, seq[(i + 1) % 3]); }
+      primary: function () { bAuto.onclick(); }
     };
   }
 
@@ -959,13 +1040,18 @@ button.cnt.vertex { border-color: var(--vertex); color: var(--vertex); } button.
     var S = Stage(two), big = S.add('big'), tag = S.add('tag');
     var panel = el('div', 'panel'); two.appendChild(panel);
     var st = { kind: 'prism', n: 3, M: null, rev: {}, frev: {} };
-    var C = Counter(function (mode, n) { big.innerHTML = '<span class="c-' + mode + '">' + WORD[mode] + '</span> <b>' + n + '</b>개'; anim(big, 'pop'); if (st.n <= 6) { reveal(st.kind, st.n, mode); } });
+    function done7(mode, n) { big.innerHTML = '<span class="c-' + mode + '">' + WORD[mode] + '</span> <b>' + n + '</b>개 ✓'; anim(big, 'pop'); if (st.n <= 6) reveal(st.kind, st.n, mode); }
+    var C = Counter(done7, function (mode, n) { if (n === totalOf(st.M, mode)) done7(mode, n); else big.innerHTML = '<span class="c-' + mode + '">' + WORD[mode] + '</span> <b>' + n + '</b>개'; });
+    S.onTap = function (x, y) { if (!C.manualOn) return; var id = pickAt(S.cv, st.M, S.yaw, S.pitch, 0.4, C.mode, x, y); if (id >= 0) { S.spin = false; C.toggle(id); } };
     var krow = el('div', 'row'); [['prism', '각기둥'], ['pyramid', '각뿔'], ['frustum', '각뿔대']].forEach(function (x) {
       var b = el('button', 'pick mini', x[1]); b.dataset.k = x[0]; b.onclick = function () { st.kind = x[0]; load(); }; krow.appendChild(b);
     });
     panel.appendChild(krow);
     var nrow = baseButtons(panel, st, load, 3, 8);
-    var crow = el('div', 'row'); ['vertex', 'edge', 'face'].forEach(function (m) { var b = el('button', 'cnt ' + m, WORD[m] + ' 세기'); b.onclick = function () { big.innerHTML = ''; C.start(st.M, m); }; crow.appendChild(b); });
+    var crow = el('div', 'row', '<span class="lab">직접 세기</span>');
+    function pick7(m) { C.manual(m); big.innerHTML = '<span class="c-' + m + '">' + WORD[m] + '</span> <b>0</b>개'; Array.prototype.forEach.call(crow.querySelectorAll('.cnt'), function (b) { b.classList.toggle('on', b.dataset.m === m); }); S.spin = false; }
+    ['vertex', 'edge', 'face'].forEach(function (m) { var b = el('button', 'cnt ' + m, WORD[m]); b.dataset.m = m; b.onclick = function () { pick7(m); }; crow.appendChild(b); });
+    var bAuto7 = el('button', '', '자동으로 세기 ▶'); bAuto7.onclick = function () { var m = C.mode || 'vertex'; big.innerHTML = ''; C.start(st.M, m); }; crow.appendChild(bAuto7);
     panel.appendChild(crow);
     var tbl = el('div', 'tabwrap'); panel.appendChild(tbl);
     panel.appendChild(el('p', 'note', '칸을 누르면 값이 열려요. 먼저 학생들에게 예상하게 해 보세요. 마지막 줄은 규칙(식)이에요.'));
@@ -993,7 +1079,7 @@ button.cnt.vertex { border-color: var(--vertex); color: var(--vertex); } button.
       else if (td.dataset.f) { st.frev[td.dataset.f] = st.frev[td.dataset.f] ? 0 : 1; table(td.dataset.f); }
     });
     function load() {
-      st.M = solid(st.kind, st.n); C.clear(); big.innerHTML = ''; tag.textContent = NAMES[st.n] + KIND[st.kind]; S.reset();
+      st.M = solid(st.kind, st.n); tag.textContent = NAMES[st.n] + KIND[st.kind]; S.reset(); if (crow) pick7(C.mode || 'vertex');
       Array.prototype.forEach.call(krow.children, function (b) { b.classList.toggle('sel', b.dataset.k === st.kind); });
       table();
     }
@@ -1001,7 +1087,7 @@ button.cnt.vertex { border-color: var(--vertex); color: var(--vertex); } button.
     var seq = ['vertex', 'edge', 'face'];
     return {
       frame: function (dt, col) { if (S.tick(dt)) drawCount(S.cv, st.M, S.yaw, S.pitch, 0.4, C.mode, C.shown(), col); },
-      primary: function () { var i = seq.indexOf(C.mode); big.innerHTML = ''; C.start(st.M, seq[(i + 1) % 3]); }
+      primary: function () { bAuto7.onclick(); }
     };
   }
 
@@ -1011,6 +1097,7 @@ button.cnt.vertex { border-color: var(--vertex); color: var(--vertex); } button.
     { sec: 0, title: '다면체일까, 아닐까?', mount: sceneGuess },
     { sec: 0, title: '다면체의 뜻 만들기', mount: sceneDefine },
     { sec: 1, title: '면의 개수로 이름 짓기', mount: sceneNameByFaces },
+    { sec: 1, title: '각기둥과 각뿔로 나눠 보기', mount: scenePrismPyramid },
     { sec: 1, title: '각뿔을 잘라 각뿔대 만들기', mount: sceneCut },
     { sec: 1, title: '각기둥 · 각뿔대 · 각뿔', mount: sceneFamily },
     { sec: 2, title: '면 · 모서리 · 꼭짓점', mount: sceneTerms },
@@ -1047,7 +1134,7 @@ button.cnt.vertex { border-color: var(--vertex); color: var(--vertex); } button.
     if (active && active.frame) active.frame(dt, cols());
     requestAnimationFrame(loop);
   }
-  var start = /^#s(\d)$/.exec(location.hash);
+  var start = /^#s(\d+)$/.exec(location.hash);
   go(start ? Math.min(SCENES.length, Math.max(1, Number(start[1]))) - 1 : 0);
   requestAnimationFrame(loop);
 })();
