@@ -100,6 +100,29 @@ button:disabled { opacity: .35; cursor: default; }
 .choose.yes { color: var(--ok); border-color: var(--ok); } .choose.no { color: var(--bad); border-color: var(--bad); }
 .choose.yes.sel { background: var(--ok); color: #fff; } .choose.no.sel { background: var(--bad); color: #fff; }
 @media (max-width: 1000px), (max-height: 560px) { .sortwrap { grid-template-columns: 1fr; } .bin .cards { grid-auto-rows: 120px; } .bin { min-height: 200px; } }
+.modal { opacity: 0; transition: opacity .2s ease; }
+.modal.show { opacity: 1; }
+.modal .mbox { transform: scale(.94) translateY(12px); transition: transform .22s cubic-bezier(.2,.8,.3,1); position: relative; }
+.modal.show .mbox { transform: none; }
+.mhead small { font-family: var(--body); font-size: 16px; color: var(--muted); margin-left: 8px; }
+.mhead .mprev, .mhead .mnext { min-width: 52px; padding: 4px 10px; }
+.mstage { transition: none; }
+@keyframes outL { to { transform: translateX(-60px); opacity: 0; } }
+@keyframes outR { to { transform: translateX(60px); opacity: 0; } }
+@keyframes inR { from { transform: translateX(60px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes inL { from { transform: translateX(-60px); opacity: 0; } to { transform: none; opacity: 1; } }
+.mstage.out-l { animation: outL .17s ease-in forwards; } .mstage.out-r { animation: outR .17s ease-in forwards; }
+.mstage.in-r { animation: inR .26s ease-out; } .mstage.in-l { animation: inL .26s ease-out; }
+.choose kbd { font-family: var(--body); font-size: .5em; border: 1.5px solid currentColor; border-radius: 6px; padding: 0 6px; margin-left: 8px; vertical-align: middle; opacity: .7; }
+.choose.flash { transform: scale(.96); filter: brightness(1.1); }
+.choose.yes.flash { background: var(--ok); color: #fff; } .choose.no.flash { background: var(--bad); color: #fff; }
+.choose { transition: transform .12s, background .12s, color .12s; }
+.mtoast { position: absolute; left: 50%; bottom: 104px; transform: translateX(-50%); font-family: var(--display); font-size: clamp(18px, 1.8vw, 26px); padding: 6px 18px; border-radius: 999px; color: #fff; opacity: 0; pointer-events: none; white-space: nowrap; }
+.mtoast.yes { background: var(--ok); } .mtoast.no { background: var(--bad); }
+@keyframes toast { 0% { opacity: 0; transform: translate(-50%, 10px); } 15% { opacity: 1; transform: translate(-50%, 0); } 75% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -8px); } }
+.mtoast.toast { animation: toast 1.1s ease forwards; }
+.card { transition: border-color .2s, background .2s; }
+@media (prefers-reduced-motion: reduce) { .modal, .modal .mbox, .choose { transition: none; } .mstage.out-l, .mstage.out-r, .mstage.in-l, .mstage.in-r { animation: none; } }
 /* 장면 2 */
 .sent { font-family: var(--display); font-size: clamp(26px, 2.8vw, 44px); line-height: 1.7; }
 .sent b { font-weight: 400; color: var(--edge); }
@@ -639,27 +662,74 @@ button.cnt.vertex { border-color: var(--vertex); color: var(--vertex); } button.
     bReset.onclick = function () { st.revealed = false; cards.forEach(function (C) { C.at = 'pool'; pool.querySelector('.cards').appendChild(C.el); }); refresh(); };
 
     // 크게 보기 창
-    var modal = el('div', 'modal', '<div class="mbox"><div class="mhead"><h3></h3><button class="mclose" aria-label="닫기">✕ 닫기</button></div><div class="mstage"></div><div class="mbtns"></div></div>');
+    var modal = el('div', 'modal', '<div class="mbox"><div class="mhead"><h3></h3><button class="mprev" aria-label="이전 도형">◀</button><button class="mnext" aria-label="다음 도형">▶</button><button class="mclose" aria-label="닫기">✕ 닫기</button></div><div class="mstage"></div><div class="mbtns"></div></div>');
     modal.hidden = true; main.appendChild(modal);
     var MS = Stage(modal.querySelector('.mstage')), mStamp = MS.add('stamp'), mBall = el('button', 'corner', '공 넣어 보기 ⚽'); MS.el.appendChild(mBall);
-    var bY = el('button', 'choose yes', '다면체다 ○'), bN = el('button', 'choose no', '다면체가 아니다 ✕');
+    var bY = el('button', 'choose yes', '다면체다 ○ <kbd>O</kbd>'), bN = el('button', 'choose no', '다면체가 아니다 ✕ <kbd>X</kbd>');
     modal.querySelector('.mbtns').appendChild(bY); modal.querySelector('.mbtns').appendChild(bN);
-    function openModal(C) {
-      st.modal = C; st.ball = null; modal.hidden = false;
-      modal.querySelector('h3').textContent = (C.k + 1) + '번 도형' + (st.revealed ? ' · ' + SH[C.key][0] : '');
+    var mStageBox = modal.querySelector('.mstage'), mToast = el('div', 'mtoast'); modal.querySelector('.mbox').appendChild(mToast);
+    function fill(C) {   // 창 안의 내용만 바꾼다
+      st.modal = C; st.ball = null;
+      var left = cards.filter(function (x) { return x.at === 'pool'; }).length;
+      modal.querySelector('h3').innerHTML = (C.k + 1) + '번 도형' + (st.revealed ? ' · ' + SH[C.key][0] : '') + ' <small>남은 도형 ' + left + '개</small>';
       MS.reset(C.pitch); MS.el.querySelector('.hint').hidden = !!mesh(C.key).box;
       mBall.hidden = !mesh(C.key).box; mBall.textContent = '공 넣어 보기 ⚽';
       var poly = SH[C.key][1];
       mStamp.className = st.revealed ? 'stamp ' + (poly ? 'yes' : 'no') : 'stamp'; mStamp.textContent = st.revealed ? (poly ? '다면체 ○' : '다면체가 아니에요 ✕') : '';
       bY.classList.toggle('sel', C.at === 'yes'); bN.classList.toggle('sel', C.at === 'no');
     }
-    function closeModal() { modal.hidden = true; st.modal = null; }
-    bY.onclick = function () { var C = st.modal; closeModal(); move(C, 'yes'); };
-    bN.onclick = function () { var C = st.modal; closeModal(); move(C, 'no'); };
+    function openModal(C) {
+      fill(C); modal.hidden = false; void modal.offsetWidth; modal.classList.add('show');
+    }
+    function closeModal() {
+      if (modal.hidden) return;
+      modal.classList.remove('show'); st.modal = null;
+      setTimeout(function () { if (!modal.classList.contains('show')) modal.hidden = true; }, 220);
+    }
+    // 다음 도형: 지금 도형 뒤에서 아직 안 나눈 것부터, 없으면 앞에서
+    function nextOf(C, dir, onlyPool) {
+      for (var s2 = 1; s2 <= cards.length; s2++) {
+        var x = cards[(C.k + dir * s2 + cards.length * 2) % cards.length];
+        if (!onlyPool || x.at === 'pool') return x;
+      }
+      return null;
+    }
+    var busy = false;
+    function slideTo(C, dir) {   // 도형을 옆으로 밀어내고 다음 도형을 들여온다
+      if (busy) return; busy = true;
+      mStageBox.classList.remove('in-l', 'in-r'); mStageBox.classList.add(dir > 0 ? 'out-l' : 'out-r');
+      setTimeout(function () {
+        fill(C); mStageBox.classList.remove('out-l', 'out-r'); void mStageBox.offsetWidth; mStageBox.classList.add(dir > 0 ? 'in-r' : 'in-l');
+        busy = false;
+      }, 170);
+    }
+    function choose(where) {
+      var C = st.modal; if (!C || busy) return;
+      (where === 'yes' ? bY : bN).classList.add('flash');
+      setTimeout(function () { bY.classList.remove('flash'); bN.classList.remove('flash'); }, 300);
+      move(C, where);
+      mToast.textContent = (C.k + 1) + '번 → ' + (where === 'yes' ? '다면체예요 ○' : '다면체가 아니에요 ✕');
+      mToast.className = 'mtoast ' + where; anim(mToast, 'toast');
+      var nx = nextOf(C, 1, true);
+      if (nx) slideTo(nx, 1); else setTimeout(closeModal, 350);
+    }
+    bY.onclick = function () { choose('yes'); };
+    bN.onclick = function () { choose('no'); };
     mBall.onclick = function () { st.ball = performance.now(); mBall.textContent = '다시 넣기 ⚽'; };
     modal.querySelector('.mclose').onclick = closeModal;
+    modal.querySelector('.mprev').onclick = function () { if (st.modal) slideTo(nextOf(st.modal, -1, false), -1); };
+    modal.querySelector('.mnext').onclick = function () { if (st.modal) slideTo(nextOf(st.modal, 1, false), 1); };
     modal.addEventListener('pointerdown', function (e) { if (e.target === modal) closeModal(); });
-    function onKey(e) { if (!st.modal) return; if (e.key === 'Escape') closeModal(); }
+    // 창이 열려 있을 때: O/X 고르기, ← → 도형 넘기기, Esc 닫기
+    function onKey(e) {
+      if (!st.modal) return;
+      var k = e.key.toLowerCase();
+      if (k === 'escape') closeModal();
+      else if (k === 'o' || k === '1') choose('yes');
+      else if (k === 'x' || k === '2') choose('no');
+      else if (k === 'arrowright' || k === 'pagedown') { e.preventDefault(); modal.querySelector('.mnext').onclick(); }
+      else if (k === 'arrowleft' || k === 'pageup') { e.preventDefault(); modal.querySelector('.mprev').onclick(); }
+    }
     document.addEventListener('keydown', onKey);
     refresh();
     return {
