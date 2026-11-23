@@ -71,6 +71,35 @@ button:disabled { opacity: .35; cursor: default; }
 .gtile .nm { position: absolute; left: 0; right: 0; bottom: 6px; text-align: center; font-size: clamp(16px, 1.4vw, 20px); font-weight: 700; }
 .gtile.yes { border-color: var(--ok); } .gtile.yes .st { color: var(--ok); }
 .gtile.no { border-color: var(--bad); } .gtile.no .st { color: var(--bad); }
+/* 장면 1: 분류 상자 */
+.sortwrap { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+.bin { background: var(--panel); border: 3px dashed var(--line); border-radius: 18px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; min-height: 0; transition: background .15s, border-color .15s; }
+.bin h3 { margin: 0; font-family: var(--display); font-weight: 400; font-size: clamp(22px, 2.2vw, 32px); text-align: center; }
+.bin .cnt { color: var(--muted); font-size: .8em; }
+.bin.yes { border-style: solid; border-color: var(--ok); } .bin.yes h3 { color: var(--ok); }
+.bin.no { border-style: solid; border-color: var(--bad); } .bin.no h3 { color: var(--bad); }
+.bin.over { background: #e7f1fd; border-color: var(--edge); }
+.bin .cards { flex: 1; min-height: 0; overflow: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); grid-auto-rows: 132px; gap: 8px; align-content: start; }
+.card { position: relative; background: var(--bg); border: 3px solid var(--line); border-radius: 14px; cursor: grab; touch-action: none; }
+.card canvas { position: absolute; left: 0; top: 0; width: 100%; height: calc(100% - 22px); pointer-events: none; }
+.card .num { position: absolute; left: 8px; top: 2px; font-family: var(--display); font-size: 22px; color: var(--muted); }
+.card .mark { position: absolute; right: 8px; top: -2px; font-family: var(--display); font-size: 30px; }
+.card .nm { position: absolute; left: 0; right: 0; bottom: 3px; text-align: center; font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card.right { border-color: var(--ok); } .card.right .mark { color: var(--ok); }
+.card.wrong { border-color: var(--bad); background: #fff0f0; } .card.wrong .mark { color: var(--bad); }
+.card.dragging { position: fixed; z-index: 50; cursor: grabbing; pointer-events: none; box-shadow: 0 12px 30px rgba(0,0,0,.25); }
+@keyframes shake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-8px); } 40% { transform: translateX(8px); } 60% { transform: translateX(-5px); } 80% { transform: translateX(5px); } }
+.shake { animation: shake .4s ease; }
+.modal { position: fixed; inset: 0; z-index: 40; background: rgba(20, 28, 38, .55); display: flex; align-items: center; justify-content: center; padding: 24px; }
+.mbox { background: var(--panel); border-radius: 20px; width: min(980px, 100%); height: min(760px, 100%); display: flex; flex-direction: column; gap: 12px; padding: 16px 20px; }
+.mhead { display: flex; align-items: center; gap: 12px; }
+.mhead h3 { flex: 1; margin: 0; font-family: var(--display); font-weight: 400; font-size: clamp(26px, 2.6vw, 40px); }
+.mstage { flex: 1; min-height: 0; display: flex; } .mstage .stage { flex: 1; }
+.mbtns { display: flex; gap: 12px; }
+.mbtns .choose { flex: 1; min-height: 72px; font-size: clamp(24px, 2.4vw, 34px); border-width: 3px; }
+.choose.yes { color: var(--ok); border-color: var(--ok); } .choose.no { color: var(--bad); border-color: var(--bad); }
+.choose.yes.sel { background: var(--ok); color: #fff; } .choose.no.sel { background: var(--bad); color: #fff; }
+@media (max-width: 1000px), (max-height: 560px) { .sortwrap { grid-template-columns: 1fr; } .bin .cards { grid-auto-rows: 120px; } .bin { min-height: 200px; } }
 /* 장면 2 */
 .sent { font-family: var(--display); font-size: clamp(26px, 2.8vw, 44px); line-height: 1.7; }
 .sent b { font-weight: 400; color: var(--edge); }
@@ -543,41 +572,103 @@ button.cnt.vertex { border-color: var(--vertex); color: var(--vertex); } button.
     var M = finish({ V: V, F: F, open: true, box: true }); M.tint = tint; M.noEdge = noEdge; M.c = base.c; M.R = base.R; return M;
   }
 
-  // ================= 장면 1: 다면체일까, 아닐까? =================
+  // ================= 장면 1: 다면체일까, 아닐까? (분류하기) =================
+  // 카드를 누르면 크게 보고 "다면체다/아니다"를 골라 상자로 보낸다. 끌어서 옮길 수도 있다. 그다음 정답 공개.
   var GUESS12 = ['cube', 'cylinder', 'sqPyr', 'halfCyl', 'triPrism', 'sphere', 'octa', 'openBox', 'hexPrism', 'cone', 'lPrism', 'plane5'];
   function sceneGuess(main) {
-    var head = el('div', 'scene-head', '<h2>다면체라고 생각하는 도형은 몇 번일까요?</h2>');
-    var tools = el('div', 'tools'); var bAll = el('button', '', '모두 공개'), bHide = el('button', '', '모두 가리기');
-    tools.appendChild(bAll); tools.appendChild(bHide); head.appendChild(tools); main.appendChild(head);
-    var grid = el('div', 'grid12'); main.appendChild(grid);
-    var tiles = GUESS12.map(function (key, k) {
-      var t = el('div', 'gtile', '<canvas></canvas><span class="num">' + (k + 1) + '</span><span class="st"></span><span class="nm"></span>');
-      t.setAttribute('role', 'button'); t.setAttribute('aria-label', (k + 1) + '번 도형');
-      grid.appendChild(t);
-      var T = { el: t, cv: t.querySelector('canvas'), key: key, yaw: 0.3 + k * 0.9, pitch: mesh(key).open ? 0.6 : 0.38, open: false, drag: null };
-      t.addEventListener('pointerdown', function (e) { t.setPointerCapture(e.pointerId); T.drag = { x: e.clientX, y: e.clientY, yaw: T.yaw, pitch: T.pitch, moved: false }; });
-      t.addEventListener('pointermove', function (e) {
-        if (!T.drag) return; var dx = e.clientX - T.drag.x, dy = e.clientY - T.drag.y;
-        if (!T.drag.moved && Math.hypot(dx, dy) < 8) return;
-        T.drag.moved = true; T.yaw = T.drag.yaw + dx * 0.012; T.pitch = Math.max(-1.45, Math.min(1.45, T.drag.pitch + dy * 0.012));
-      });
-      t.addEventListener('pointerup', function () { var tap = T.drag && !T.drag.moved; T.drag = null; if (tap) set(T, !T.open); });
-      return T;
-    });
-    function set(T, open) {
-      T.open = open; var poly = SH[T.key][1];
-      T.el.className = 'gtile' + (open ? (poly ? ' yes' : ' no') : '');
-      T.el.querySelector('.st').textContent = open ? (poly ? '○' : '✕') : '';
-      T.el.querySelector('.nm').textContent = open ? SH[T.key][0] : '';
-      if (open) anim(T.el.querySelector('.st'), 'pop');
+    var head = el('div', 'scene-head', '<h2>다면체일까, 아닐까? 골라서 나눠 보세요</h2>');
+    var tools = el('div', 'tools'), bRev = el('button', 'primary', '정답 공개'), bFix = el('button', '', '정답대로 정리'), bReset = el('button', '', '처음부터');
+    tools.appendChild(bRev); tools.appendChild(bFix); tools.appendChild(bReset); head.appendChild(tools); main.appendChild(head);
+    var wrap = el('div', 'sortwrap'); main.appendChild(wrap);
+    function bin(cls, title) {
+      var b = el('div', 'bin ' + cls, '<h3>' + title + ' <span class="cnt"></span></h3><div class="cards"></div>');
+      wrap.appendChild(b); return b;
     }
-    bAll.onclick = function () { tiles.forEach(function (T) { set(T, true); }); };
-    bHide.onclick = function () { tiles.forEach(function (T) { set(T, false); }); };
+    var pool = bin('pool', '아직 안 나눈 도형'), yes = bin('yes', '다면체예요 ○'), no = bin('no', '다면체가 아니에요 ✕');
+    var st = { revealed: false, modal: null };
+    var cards = GUESS12.map(function (key, k) {
+      var c = el('div', 'card', '<canvas></canvas><span class="num">' + (k + 1) + '</span><span class="mark"></span><span class="nm"></span>');
+      c.setAttribute('role', 'button'); c.setAttribute('aria-label', (k + 1) + '번 도형'); c.tabIndex = 0;
+      pool.querySelector('.cards').appendChild(c);
+      var C = { el: c, cv: c.querySelector('canvas'), key: key, k: k, yaw: 0.3 + k * 0.9, pitch: mesh(key).box ? 0.85 : mesh(key).open ? 0.6 : 0.38, at: 'pool' };
+      // 누르면 크게 보기, 끌면 옮기기
+      var drag = null;
+      c.addEventListener('pointerdown', function (e) { if (e.button) return; c.setPointerCapture(e.pointerId); var r = c.getBoundingClientRect(); drag = { x: e.clientX, y: e.clientY, dx: e.clientX - r.left, dy: e.clientY - r.top, w: r.width, h: r.height, moving: false }; });
+      c.addEventListener('pointermove', function (e) {
+        if (!drag) return;
+        if (!drag.moving) {
+          if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 8) return;
+          drag.moving = true; c.classList.add('dragging'); c.style.width = drag.w + 'px'; c.style.height = drag.h + 'px';
+        }
+        c.style.left = (e.clientX - drag.dx) + 'px'; c.style.top = (e.clientY - drag.dy) + 'px';
+        var t = dropTarget(e.clientX, e.clientY); [pool, yes, no].forEach(function (b) { b.classList.toggle('over', b === t); });
+      });
+      c.addEventListener('pointerup', function (e) {
+        if (!drag) return; var was = drag.moving; drag = null;
+        if (!was) { openModal(C); return; }
+        var t = dropTarget(e.clientX, e.clientY);
+        c.classList.remove('dragging'); c.style.left = c.style.top = c.style.width = c.style.height = '';
+        [pool, yes, no].forEach(function (b) { b.classList.remove('over'); });
+        if (t) move(C, t === yes ? 'yes' : t === no ? 'no' : 'pool');
+      });
+      c.addEventListener('pointercancel', function () { drag = null; c.classList.remove('dragging'); c.style.left = c.style.top = c.style.width = c.style.height = ''; });
+      c.addEventListener('keydown', function (e) { if (e.key === 'Enter') openModal(C); });
+      return C;
+    });
+    function dropTarget(x, y) { var hit = document.elementFromPoint(x, y); return hit && hit.closest ? hit.closest('.bin') : null; }
+    function move(C, where) {
+      C.at = where; (where === 'yes' ? yes : where === 'no' ? no : pool).querySelector('.cards').appendChild(C.el);
+      anim(C.el, 'pop'); refresh();
+    }
+    function refresh() {
+      [[pool, 'pool'], [yes, 'yes'], [no, 'no']].forEach(function (b) { b[0].querySelector('.cnt').textContent = '(' + cards.filter(function (C) { return C.at === b[1]; }).length + ')'; });
+      cards.forEach(function (C) {
+        var poly = SH[C.key][1], right = C.at === 'pool' ? null : (C.at === 'yes') === poly;
+        C.el.classList.toggle('right', st.revealed && right === true);
+        C.el.classList.toggle('wrong', st.revealed && right === false);
+        C.el.querySelector('.mark').textContent = st.revealed && right !== null ? (right ? '○' : '✕') : '';
+        C.el.querySelector('.nm').textContent = st.revealed ? SH[C.key][0] : '';
+      });
+      bRev.textContent = st.revealed ? '정답 가리기' : '정답 공개';
+    }
+    bRev.onclick = function () {
+      st.revealed = !st.revealed; refresh();
+      if (st.revealed) cards.forEach(function (C) { if (C.el.classList.contains('wrong')) anim(C.el, 'shake'); });
+    };
+    bFix.onclick = function () { st.revealed = true; cards.forEach(function (C) { var w = SH[C.key][1] ? 'yes' : 'no'; if (C.at !== w) move(C, w); }); refresh(); };
+    bReset.onclick = function () { st.revealed = false; cards.forEach(function (C) { C.at = 'pool'; pool.querySelector('.cards').appendChild(C.el); }); refresh(); };
+
+    // 크게 보기 창
+    var modal = el('div', 'modal', '<div class="mbox"><div class="mhead"><h3></h3><button class="mclose" aria-label="닫기">✕ 닫기</button></div><div class="mstage"></div><div class="mbtns"></div></div>');
+    modal.hidden = true; main.appendChild(modal);
+    var MS = Stage(modal.querySelector('.mstage')), mStamp = MS.add('stamp'), mBall = el('button', 'corner', '공 넣어 보기 ⚽'); MS.el.appendChild(mBall);
+    var bY = el('button', 'choose yes', '다면체다 ○'), bN = el('button', 'choose no', '다면체가 아니다 ✕');
+    modal.querySelector('.mbtns').appendChild(bY); modal.querySelector('.mbtns').appendChild(bN);
+    function openModal(C) {
+      st.modal = C; st.ball = null; modal.hidden = false;
+      modal.querySelector('h3').textContent = (C.k + 1) + '번 도형' + (st.revealed ? ' · ' + SH[C.key][0] : '');
+      MS.reset(C.pitch); MS.el.querySelector('.hint').hidden = !!mesh(C.key).box;
+      mBall.hidden = !mesh(C.key).box; mBall.textContent = '공 넣어 보기 ⚽';
+      var poly = SH[C.key][1];
+      mStamp.className = st.revealed ? 'stamp ' + (poly ? 'yes' : 'no') : 'stamp'; mStamp.textContent = st.revealed ? (poly ? '다면체 ○' : '다면체가 아니에요 ✕') : '';
+      bY.classList.toggle('sel', C.at === 'yes'); bN.classList.toggle('sel', C.at === 'no');
+    }
+    function closeModal() { modal.hidden = true; st.modal = null; }
+    bY.onclick = function () { var C = st.modal; closeModal(); move(C, 'yes'); };
+    bN.onclick = function () { var C = st.modal; closeModal(); move(C, 'no'); };
+    mBall.onclick = function () { st.ball = performance.now(); mBall.textContent = '다시 넣기 ⚽'; };
+    modal.querySelector('.mclose').onclick = closeModal;
+    modal.addEventListener('pointerdown', function (e) { if (e.target === modal) closeModal(); });
+    function onKey(e) { if (!st.modal) return; if (e.key === 'Escape') closeModal(); }
+    document.addEventListener('keydown', onKey);
+    refresh();
     return {
       frame: function (dt, col) {
-        tiles.forEach(function (T) { if (!T.drag) T.yaw += dt * 0.00035; if (fit(T.cv)) render(T.cv, mesh(T.key), T.yaw, T.pitch, 0.4, 2.2, col); });
+        cards.forEach(function (C) { if (!C.el.classList.contains('dragging')) C.yaw += dt * 0.00035; if (fit(C.cv)) render(C.cv, mesh(C.key), C.yaw, C.pitch, 0.4, 2, col); });
+        if (st.modal && MS.tick(dt)) render(MS.cv, st.ball ? ballMesh(mesh(st.modal.key), st.ball) : mesh(st.modal.key), MS.yaw, MS.pitch, 0.42, 3, col);
       },
-      primary: function () { bAll.onclick(); }
+      primary: function () { if (st.modal) return; bRev.onclick(); },
+      unmount: function () { document.removeEventListener('keydown', onKey); }
     };
   }
 
@@ -858,6 +949,7 @@ button.cnt.vertex { border-color: var(--vertex); color: var(--vertex); } button.
   var cur = -1, active = null;
   function go(k) {
     if (k < 0 || k >= SCENES.length || k === cur) return;
+    if (active && active.unmount) active.unmount();
     cur = k; var main = $('scene'); main.innerHTML = '';
     active = SCENES[k].mount(main) || {};
     $('secs').innerHTML = SECS.map(function (t, i) { return '<button data-s="' + i + '" class="' + (SCENES[k].sec === i ? 'on' : '') + '">' + (i + 1) + '. ' + t + '</button>'; }).join('');
@@ -873,6 +965,7 @@ button.cnt.vertex { border-color: var(--vertex); color: var(--vertex); } button.
   // 키보드: → ← (발표용 리모컨의 PageDown/PageUp도), 1·2·3 단원, 스페이스는 장면의 주 동작
   document.addEventListener('keydown', function (e) {
     if (e.target.closest && e.target.closest('input, textarea')) return;
+    if (document.querySelector('.modal:not([hidden])')) return;
     if (e.key === 'ArrowRight' || e.key === 'PageDown') { e.preventDefault(); go(cur + 1); }
     else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); go(cur - 1); }
     else if (e.key === ' ' && !(e.target.closest && e.target.closest('button'))) { e.preventDefault(); if (active.primary) active.primary(); }
