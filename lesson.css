@@ -278,3 +278,25 @@ button.cand.no { opacity: .55; }
 .conds .chip small { font-family: var(--body); font-size: .7em; color: var(--muted); }
 .sent.big2 { font-size: clamp(22px, 2.2vw, 32px); line-height: 2.1; font-family: var(--display); }
 .ctab td.nb.okc, .ctab td.nb.noc { font-family: var(--display); }
+
+/* 회전체 3차시 */
+.shapes { display: flex; flex-wrap: wrap; gap: 8px; }
+button.pick.shp { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 10px; min-height: 0; }
+button.pick.shp span { font-size: .78em; }
+button.pick.shp.sel svg line { stroke: #fff; }
+button.pick.shp.sel svg polygon { fill: #fff; stroke: #fff; }
+button.pick.shp.done:not(.sel) { border-color: var(--ok); background: var(--ok-bg); }
+.secbox { border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; }
+.secbox canvas { width: 100%; height: clamp(150px, 24vh, 240px); display: block; }
+.seclab { font-family: var(--display); color: var(--muted); font-size: clamp(15px, 1.3vw, 19px); }
+.quiz-left { display: flex; flex-direction: column; gap: 10px; padding: 14px; }
+.qsec { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.qsec canvas { flex: 1; min-height: 0; width: 100%; display: block; }
+.qsolid { height: clamp(200px, 30vh, 320px); display: flex; } .qsolid .stage { flex: 1; min-height: 0; }
+.opts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.opts .opt { padding: 12px; }
+.opts .opt.ok { background: var(--ok-bg); border-color: var(--ok); color: var(--ok); }
+.opts .opt.no { background: #fde8e8; border-color: var(--bad); color: var(--bad); }
+.shape-pic { display: flex; align-items: center; gap: 14px; font-family: var(--display); font-size: clamp(18px, 1.7vw, 24px); }
+.shape-pic:empty { display: none; }
+.callout svg { display: block; margin-top: 6px; }
