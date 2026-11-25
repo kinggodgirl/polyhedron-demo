@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>
 <title>다면체 수업 시연</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jua&family=Noto+Sans+KR:wght@400;500;700&display=swap">
 <style>
@@ -264,6 +265,14 @@ button.cand.no { opacity: .55; }
 .drawtips p.on { color: var(--fg); background: #e7f1fd; }
 .drawtips p.done { color: var(--fg); }
 .why4 p { margin: 0 0 6px; font-size: clamp(17px, 1.5vw, 22px); }
+
+/* three.js 엔진 */
+.stage canvas.gl3d { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
+.eng3d { display: flex; align-items: center; gap: 6px; font-family: var(--display); font-size: 16px; color: var(--muted); cursor: pointer; }
+.eng3d input { width: 20px; height: 20px; }
+.eng3d small { font-family: var(--body); font-size: 12px; background: #fff4cc; color: #7a5b00; border-radius: 999px; padding: 0 6px; }
+.eng3d-msg { font-size: 14px; color: var(--bad); }
+.corner-row button:disabled { opacity: .4; }
 </style>
 </head>
 <body>
@@ -271,6 +280,8 @@ button.cand.no { opacity: .55; }
   <div class="brand">다면체 1차시<small>교사 시연용 · ← → 키로 넘기기</small></div>
   <nav id="secs" aria-label="단원"></nav>
   <nav id="dots" aria-label="장면"></nav>
+  <label class="eng3d" title="three.js로 그리기 (시범). 지금은 일반 도형과 공 넣기 장면에 적용돼요"><input type="checkbox" id="eng3d"> 3D 엔진 <small>시범</small></label>
+  <span id="eng3d-msg" class="eng3d-msg" hidden>3D 엔진은 인터넷 주소(GitHub Pages)로 열 때만 돼요</span>
 </header>
 <main id="scene"></main>
 <footer id="ft">
@@ -415,7 +426,7 @@ button.cand.no { opacity: .55; }
     plane6: ['평면 육각형', false, WHY.flat, function () { return plane(6); }]
   };
   var MESH = {};
-  function mesh(key) { if (!MESH[key]) { var m = SH[key][3](); m.open = !!m.open; MESH[key] = finish(m); } return MESH[key]; }
+  function mesh(key) { if (!MESH[key]) { var m = SH[key][3](); m.open = !!m.open; MESH[key] = finish(m); if (key === 'cube') MESH[key].ballBox = true; } return MESH[key]; }   // 정육면체: 닫힌 상자로 공 넣기·뒤집기 비교
   // ---------- 그리기 ----------
   var LIGHT = (function () { var l = [-0.35, 0.6, 0.72], s = Math.hypot(l[0], l[1], l[2]); return [l[0] / s, l[1] / s, l[2] / s]; })();
   var HALF = (function () { var h = [LIGHT[0], LIGHT[1], LIGHT[2] + 1], s = Math.hypot(h[0], h[1], h[2]); return [h[0] / s, h[1] / s, h[2] / s]; })();
@@ -450,6 +461,8 @@ button.cand.no { opacity: .55; }
   function render(cv, M, yaw, pitch, frac, lw, col) {
     var ctx = cv.getContext('2d'), W = cv._w, H = cv._h, d = cv._d;
     ctx.setTransform(d, 0, 0, d, 0, 0); ctx.clearRect(0, 0, W, H);
+    if (use3d(cv) && !M.glass && !M.extra) { G3.draw(cv, { M: M, mat: Array.isArray(yaw) ? yaw : matFromYP(yaw, pitch), frac: frac, lw: lw, col: col }); return; }
+    if (G3 && cv._box) G3.hide();
     var sc = Math.min(W, H) * frac / M.R, ox = W / 2, oy = H / 2, rot = rotFn(yaw, pitch);
     var P = M.V.map(function (v) { var r = rot(v[0] - M.c[0], v[1] - M.c[1], v[2] - M.c[2]); return { x: ox + r[0] * sc, y: oy - r[1] * sc, z: r[2] }; });
     var NN = M.N.map(function (n) { return rot(n[0], n[1], n[2]); });
@@ -591,6 +604,7 @@ button.cand.no { opacity: .55; }
     var box = el('div', 'stage ' + (cls || ''), '<canvas></canvas><div class="hint">끌어서 돌려 보세요</div><div class="stage-ctrls"><label class="stage-lock" title="체크하면 가로(좌우)·세로(상하) 두 방향으로만 깔끔하게 회전합니다"><input type="checkbox"> 고정 축</label><button type="button" class="stage-level" title="밑면을 기준과 평행하게 놓기">밑면 평행</button><button type="button" class="stage-reset" title="각도 초기화" aria-label="각도 초기화">↻</button></div>');
     holder.appendChild(box);
     var S = { el: box, cv: box.querySelector('canvas'), yaw: 0.6, pitch: 0.42, mat: matFromYP(0.6, 0.42), spin: true, defaultPitch: 0.42, lockAxis: false }, drag = null;
+    S.cv._box = box;   // three.js 엔진이 이 무대에 그릴 수 있게
     var chk = box.querySelector('.stage-lock input');
     chk.onchange = function () { S.lockAxis = chk.checked; };
     box.querySelector('.stage-level').onclick = function () {
@@ -753,101 +767,183 @@ button.cand.no { opacity: .55; }
 
   // 공 물리 엔진 (뚜껑 없는 상자: 누를 때마다 공 추가 + 3D 충돌·넘침)
   var BALLM = (function () { var p = []; for (var k = 0; k <= 5; k++) { var t = -Math.PI / 2 + Math.PI * k / 5; p.push([Math.cos(t), Math.sin(t)]); } return lathe(p, 9); })();
+  // 공 물리 (기둥 모양 상자: 뚜껑 없는 상자 · 닫힌 상자) — 상자는 뒤집을 수 있다
+  // 계산은 세계 좌표에서 하고, 벽과의 충돌만 상자 좌표로 바꿔서 한다.
   function BallSim(base) {
-    var lo = 1e9, hi = -1e9, cx = 0, cz = 0, n = base.V.length;
-    base.V.forEach(function (v) { lo = Math.min(lo, v[1]); hi = Math.max(hi, v[1]); cx += v[0] / n; cz += v[2] / n; });
-    var botFace = base.F[0].map(function (idx) { return [base.V[idx][0], base.V[idx][2]]; });
-    var inR = 1e9;
-    for (var i = 0; i < botFace.length; i++) {
-      var a = botFace[i], b = botFace[(i + 1) % botFace.length];
-      var ex = b[0] - a[0], ez = b[1] - a[1], elen = Math.hypot(ex, ez) || 1;
-      var dist = Math.abs((cx - a[0]) * ez - (cz - a[1]) * ex) / elen;
-      inR = Math.min(inR, dist);
+    var bot = base.F[0].map(function (k) { return base.V[k]; }), n = bot.length;
+    var lo = 1e9, hi = -1e9; base.V.forEach(function (v) { lo = Math.min(lo, v[1]); hi = Math.max(hi, v[1]); });
+    var cx = 0, cz = 0; bot.forEach(function (v) { cx += v[0] / n; cz += v[2] / n; });
+    var cy = (lo + hi) / 2, h = hi - lo, closed = !base.box;
+    var planes = [], inR = 1e9;   // 옆벽: 안쪽을 향한 법선 (x, z)와 거리
+    for (var i = 0; i < n; i++) {
+      var a = bot[i], b = bot[(i + 1) % n], ex = b[0] - a[0], ez = b[2] - a[2], l = Math.hypot(ex, ez);
+      var nx = -ez / l, nz = ex / l; if ((cx - a[0]) * nx + (cz - a[2]) * nz < 0) { nx = -nx; nz = -nz; }
+      var dd = a[0] * nx + a[2] * nz; planes.push([nx, nz, dd]); inR = Math.min(inR, cx * nx + cz * nz - dd);
     }
-    var r = (hi - lo) * 0.175, balls = [], queue = [];
-    function spawnBatch(count) {
+    var r = Math.min(h * 0.15, inR * 0.3), liftH = h * 0.8, G = 9.0;
+    var balls = [], queue = [], flip = { s: 0, from: 0, to: 0, t: 1 };
+    var floorY = lo;
+    function ang() { return Math.PI * flip.s; }
+    function lift() { return liftH * Math.sin(Math.min(1, flip.s * 1.6) * Math.PI / 2); }
+    function toWorld(p) { var t = ang(), c = Math.cos(t), s = Math.sin(t), y = p[1] - cy, z = p[2] - cz; return [p[0], cy + c * y - s * z + lift(), cz + s * y + c * z]; }
+    function toLocal(p) { var t = -ang(), c = Math.cos(t), s = Math.sin(t), y = p[1] - cy - lift(), z = p[2] - cz; return [p[0], cy + c * y - s * z, cz + s * y + c * z]; }
+    function dirWorld(v) { var t = ang(), c = Math.cos(t), s = Math.sin(t); return [v[0], c * v[1] - s * v[2], s * v[1] + c * v[2]]; }
+    function T() { var t = ang(), c = Math.cos(t), s = Math.sin(t), L = lift(); return [1, 0, 0, 0, 0, c, -s, cy - c * cy + s * cz + L, 0, s, c, cz - s * cy - c * cz, 0, 0, 0, 1]; }
+    function wallDist(q) { var m = 1e9, k = -1; planes.forEach(function (P, j) { var d = q[0] * P[0] + q[2] * P[1] - P[2]; if (d < m) { m = d; k = j; } }); return [m, k]; }
+    function push(b, nW, depth, e) {   // 세계 방향 nW로 depth만큼 밀어내고 속도 반사
+      b.x += nW[0] * depth; b.y += nW[1] * depth; b.z += nW[2] * depth;
+      var vn = b.vx * nW[0] + b.vy * nW[1] + b.vz * nW[2];
+      if (vn < 0) { var k = (1 + e) * vn; b.vx -= k * nW[0]; b.vy -= k * nW[1]; b.vz -= k * nW[2]; b.vx *= 0.96; b.vy *= 0.96; b.vz *= 0.96; }
+    }
+    function spawn(count) {
       for (var k = 0; k < count; k++) {
-        var ang = Math.random() * Math.PI * 2, rad = Math.random() * (inR * 0.65);
-        queue.push({
-          delay: k * 0.05,
-          x: cx + Math.cos(ang) * rad, y: hi + 0.75 + Math.random() * 0.25, z: cz + Math.sin(ang) * rad,
-          vx: (Math.random() - 0.5) * 0.35, vy: -0.6 - Math.random() * 0.4, vz: (Math.random() - 0.5) * 0.35
-        });
+        var a = Math.random() * Math.PI * 2, rr = Math.random() * Math.max(0, inR - r) * 0.8;
+        var p = closed ? [cx + Math.cos(a) * rr, lo + r + Math.random() * (h - 2 * r), cz + Math.sin(a) * rr]
+                       : [cx + Math.cos(a) * rr, hi + 0.5 + Math.random() * 0.4, cz + Math.sin(a) * rr];
+        var w = toWorld(p);
+        queue.push({ delay: k * (closed ? 0.02 : 0.07), x: w[0], y: w[1], z: w[2], vx: (Math.random() - 0.5) * 0.3, vy: closed ? 0 : -0.8, vz: (Math.random() - 0.5) * 0.3, inside: closed });
       }
     }
     function step(dt) {
-      var dts = Math.min(0.033, dt / 1000), sub = 3, h = dts / sub;
-      for (var qi = queue.length - 1; qi >= 0; qi--) {
-        queue[qi].delay -= dts;
-        if (queue[qi].delay <= 0) {
-          if (balls.length >= 52) balls.shift();
-          balls.push(queue.splice(qi, 1)[0]);
-        }
-      }
+      var dts = Math.min(0.033, dt / 1000), sub = 4, hh = dts / sub;
+      if (flip.t < 1) { flip.t = Math.min(1, flip.t + dts / 1.3); var e2 = flip.t < 0.5 ? 2 * flip.t * flip.t : 1 - Math.pow(-2 * flip.t + 2, 2) / 2; flip.s = flip.from + (flip.to - flip.from) * e2; }
+      for (var qi = queue.length - 1; qi >= 0; qi--) { queue[qi].delay -= dts; if (queue[qi].delay <= 0) { if (balls.length >= 60) balls.shift(); balls.push(queue.splice(qi, 1)[0]); } }
       for (var s2 = 0; s2 < sub; s2++) {
-        for (var i = 0; i < balls.length; i++) {
-          var b = balls[i];
-          b.vy -= 7.2 * h;
-          b.x += b.vx * h; b.y += b.vy * h; b.z += b.vz * h;
-          var dx = b.x - cx, dz = b.z - cz, d = Math.hypot(dx, dz) || 1e-6;
-          var insideXZ = Math.abs(dx) < inR && Math.abs(dz) < inR;
-          // 바닥 충돌 (상자 안쪽 또는 바깥 바닥)
-          if (b.y - r < lo && (insideXZ || d < inR * 2.5)) {
-            b.y = lo + r;
-            if (b.vy < 0) b.vy = -b.vy * 0.36;
-            b.vx *= 0.92; b.vz *= 0.92;
-          }
-          // 상자 옆벽 충돌 (상자 높이 안에 있을 때)
-          if (b.y > lo && b.y < hi + r * 0.3) {
-            var lim = inR - r;
-            if (Math.abs(dx) < inR + r && Math.abs(dz) < inR + r) {
-              if (Math.abs(dx) > lim && Math.abs(dx) < inR) {
-                var sx = dx > 0 ? 1 : -1;
-                if (b.y < hi - r * 0.15) { b.x = cx + sx * lim; b.vx = -b.vx * 0.4; }
-              }
-              if (Math.abs(dz) > lim && Math.abs(dz) < inR) {
-                var sz = dz > 0 ? 1 : -1;
-                if (b.y < hi - r * 0.15) { b.z = cz + sz * lim; b.vz = -b.vz * 0.4; }
-              }
+        balls.forEach(function (b) {
+          b.vy -= G * hh; b.x += b.vx * hh; b.y += b.vy * hh; b.z += b.vz * hh;
+          var q = toLocal([b.x, b.y, b.z]), wd = wallDist(q), m = wd[0];
+          if (b.inside) {
+            if (q[1] < lo + r) push(b, dirWorld([0, 1, 0]), lo + r - q[1], 0.3);
+            if (closed && q[1] > hi - r) push(b, dirWorld([0, -1, 0]), q[1] - (hi - r), 0.3);
+            if (!closed && q[1] > hi + r * 0.3) { b.inside = false; return; }   // 뚫린 곳으로 빠져나감
+            planes.forEach(function (P) { var d = q[0] * P[0] + q[2] * P[1] - P[2]; if (d < r && (closed || q[1] < hi)) push(b, dirWorld([P[0], 0, P[1]]), r - d, 0.3); });
+          } else {
+            if (!closed && m > r * 0.9 && q[1] < hi + r && q[1] > lo) { b.inside = true; return; }   // 위에서 상자 안으로 들어감
+            var top = closed ? hi : hi;
+            if (q[1] > lo - r && q[1] < top + r && m > -r) {   // 상자 바깥 면에 닿음 → 가장 가까운 바깥쪽으로 밀기
+              var opts = [[m + r, dirWorld([-planes[wd[1]][0], 0, -planes[wd[1]][1]])], [q[1] - (lo - r), dirWorld([0, -1, 0])]];
+              if (closed || m < r * 0.9) opts.push([top + r - q[1], dirWorld([0, 1, 0])]);
+              opts.sort(function (u, v) { return u[0] - v[0]; });
+              if (opts[0][0] > 0) push(b, opts[0][1], opts[0][0], 0.3);
             }
           }
-        }
-        // 공끼리 3D 충돌
+          if (b.y < floorY + r) { b.y = floorY + r; if (b.vy < 0) b.vy = -b.vy * 0.3; b.vx *= 0.97; b.vz *= 0.97; }
+        });
         var minD = 2 * r;
-        for (var i = 0; i < balls.length; i++) {
-          for (var j = i + 1; j < balls.length; j++) {
-            var a = balls[i], b = balls[j];
-            var dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
-            var dist = Math.hypot(dx, dy, dz);
-            if (dist > 0 && dist < minD) {
-              var nx = dx / dist, ny = dy / dist, nz = dz / dist;
-              var pen = (minD - dist) * 0.5;
-              a.x -= nx * pen; a.y -= ny * pen; a.z -= nz * pen;
-              b.x += nx * pen; b.y += ny * pen; b.z += nz * pen;
-              var rvx = b.vx - a.vx, rvy = b.vy - a.vy, rvz = b.vz - a.vz;
-              var vn = rvx * nx + rvy * ny + rvz * nz;
-              if (vn < 0) {
-                var imp = -(1 + 0.42) * vn * 0.5;
-                a.vx -= imp * nx; a.vy -= imp * ny; a.vz -= imp * nz;
-                b.vx += imp * nx; b.vy += imp * ny; b.vz += imp * nz;
-              }
-            }
+        for (var i = 0; i < balls.length; i++) for (var j = i + 1; j < balls.length; j++) {
+          var A = balls[i], B = balls[j], dx = B.x - A.x, dy = B.y - A.y, dz = B.z - A.z, dist = Math.hypot(dx, dy, dz);
+          if (dist > 0 && dist < minD) {
+            var nx = dx / dist, ny = dy / dist, nz = dz / dist, pen = (minD - dist) * 0.5;
+            A.x -= nx * pen; A.y -= ny * pen; A.z -= nz * pen; B.x += nx * pen; B.y += ny * pen; B.z += nz * pen;
+            var vn = (B.vx - A.vx) * nx + (B.vy - A.vy) * ny + (B.vz - A.vz) * nz;
+            if (vn < 0) { var imp = -(1 + 0.3) * vn * 0.5; A.vx -= imp * nx; A.vy -= imp * ny; A.vz -= imp * nz; B.vx += imp * nx; B.vy += imp * ny; B.vz += imp * nz; }
           }
         }
       }
-      balls = balls.filter(function (b) { return b.y > lo - 2.5 && Math.hypot(b.x - cx, b.z - cz) < inR * 3.2; });
+      balls = balls.filter(function (b) { return Math.hypot(b.x - cx, b.z - cz) < inR * 9 && b.y > floorY - 1; });
     }
-    function meshOut() {
-      if (!balls.length) return base;
-      var V = base.V.slice(), F = base.F.slice(), tint = base.F.map(function () { return false; }), noEdge = tint.slice();
-      balls.forEach(function (b) {
-        var off = V.length;
-        BALLM.V.forEach(function (v) { V.push([b.x + v[0] * r, b.y + v[1] * r, b.z + v[2] * r]); });
-        BALLM.F.forEach(function (f) { F.push(f.map(function (k) { return k + off; })); tint.push(true); noEdge.push(true); });
-      });
-      var M = finish({ V: V, F: F, open: true, box: true }); M.tint = tint; M.noEdge = noEdge; M.c = base.c; M.R = base.R; return M;
+    var view = { c: [cx, cy + h * 0.38, cz], R: Math.max(base.R * 1.22, h * 1.25) };
+    return {
+      base: base, r: r, closed: closed, c: view.c, R: view.R,
+      add: function () { if (flip.s === 0) spawn(closed ? 10 : 7); },
+      clear: function () { balls = []; queue = []; },
+      flip: function () { flip.from = flip.s; flip.to = flip.to > 0.5 ? 0 : 1; flip.t = 0; },
+      flipped: function () { return flip.to > 0.5; },
+      upright: function () { return flip.s === 0; },
+      step: step, T: T, toWorld: toWorld, dirWorld: dirWorld,
+      balls: function () { return balls.map(function (b) { return [b.x, b.y, b.z, b.inside]; }); },
+      count: function () { return balls.length + queue.length; }
+    };
+  }
+  // ---- 공이 든 상자를 2D로 그리기: 뒷벽 → 안쪽 공 → 앞벽 → 바깥 공 (상자는 볼록하니 이 순서면 맞다) ----
+  function renderSim(cv, sim, yaw, pitch, frac, lw, col) {
+    var ctx = cv.getContext('2d'), W = cv._w, H = cv._h, d = cv._d, M = sim.base;
+    ctx.setTransform(d, 0, 0, d, 0, 0); ctx.clearRect(0, 0, W, H);
+    var mat = Array.isArray(yaw) ? yaw : matFromYP(yaw, pitch), rot = rotFn(mat);
+    var sc = Math.min(W, H) * frac / sim.R, ox = W / 2, oy = H / 2, c = sim.c;
+    function scr(w) { var q = rot(w[0] - c[0], w[1] - c[1], w[2] - c[2]); return { x: ox + q[0] * sc, y: oy - q[1] * sc, z: q[2] }; }
+    var Vw = M.V.map(sim.toWorld), P = Vw.map(scr);
+    var B = sim.balls().map(function (b) { var s = scr(b); s.inside = b[3]; return s; });
+    var labelOk = sim.upright() && M.box;
+    if (use3d(cv)) {
+      G3.draw(cv, { M: M, mat: mat, frac: frac, lw: lw, col: col, c: c, R: sim.R, T: sim.T(), balls: sim.balls(), r: sim.r, glass: sim.closed, rim: labelOk });
+      if (labelOk) rimLabel(ctx, M, P, W, H, lw, col);
+      return;
     }
-    return { add: function () { spawnBatch(7); }, clear: function () { balls = []; queue = []; }, step: step, mesh: meshOut, count: function () { return balls.length + queue.length; } };
+    if (G3 && cv._box) G3.hide();
+    var NN = M.N.map(function (n) { var w = sim.dirWorld(n); return rot(w[0], w[1], w[2]); });
+    var front = NN.map(function (n) { return n[2] > 0; });
+    var zc = scr(sim.toWorld([c[0], (M.V.reduce(function (a, v) { return a + v[1]; }, 0) / M.V.length), c[2]])).z;
+    var R = sim.r * sc, glass = sim.closed;
+    function ball(b) {
+      var g = ctx.createRadialGradient(b.x - R * 0.35, b.y - R * 0.4, R * 0.1, b.x, b.y, R);
+      var base = col.alt;
+      g.addColorStop(0, 'rgb(' + base.map(function (v) { return Math.min(255, Math.round(v + (255 - v) * 0.6)); }).join(',') + ')');
+      g.addColorStop(0.55, 'rgb(' + base.join(',') + ')');
+      g.addColorStop(1, 'rgb(' + base.map(function (v) { return Math.round(v * 0.62); }).join(',') + ')');
+      ctx.beginPath(); ctx.arc(b.x, b.y, R, 0, Math.PI * 2); ctx.fillStyle = g; ctx.fill();
+      ctx.lineWidth = 1.2; ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.stroke();
+    }
+    function face(i, alpha, dark) {
+      var f = M.F[i], n = NN[i], sg = front[i] ? 1 : -1;
+      var lam = Math.max(0, sg * (n[0] * LIGHT[0] + n[1] * LIGHT[1] + n[2] * LIGHT[2])), k = (0.55 + 0.5 * lam) * (dark ? 0.45 : 1);
+      ctx.beginPath(); f.forEach(function (v, j) { j ? ctx.lineTo(P[v].x, P[v].y) : ctx.moveTo(P[v].x, P[v].y); }); ctx.closePath();
+      ctx.globalAlpha = alpha; ctx.fillStyle = 'rgb(' + col.base.map(function (v) { return Math.min(255, Math.round(v * k)); }).join(',') + ')'; ctx.fill(); ctx.globalAlpha = 1;
+    }
+    function edges(list, dashed, w) {
+      ctx.beginPath(); list.forEach(function (e) { ctx.moveTo(P[e.a].x, P[e.a].y); ctx.lineTo(P[e.b].x, P[e.b].y); });
+      ctx.setLineDash(dashed ? [7, 6] : []); ctx.strokeStyle = col.fg; ctx.lineWidth = w; ctx.lineCap = 'round'; ctx.stroke(); ctx.setLineDash([]);
+    }
+    var backF = [], frontF = [];
+    M.F.forEach(function (f, i) { (front[i] ? frontF : backF).push(i); });
+    var backE = M.E.filter(function (e) { return !e.f.some(function (g) { return front[g]; }); });
+    var frontE = M.E.filter(function (e) { return e.f.some(function (g) { return front[g]; }); });
+    var outFar = B.filter(function (b) { return !b.inside && b.z < zc; }).sort(function (a, b) { return a.z - b.z; });
+    var inside = B.filter(function (b) { return b.inside; }).sort(function (a, b) { return a.z - b.z; });
+    var outNear = B.filter(function (b) { return !b.inside && b.z >= zc; }).sort(function (a, b) { return a.z - b.z; });
+    outFar.forEach(ball);
+    backF.forEach(function (i) { face(i, glass ? 0.22 : 1, !glass); });
+    edges(backE, glass, glass ? lw * 0.8 : lw * 0.7);
+    inside.forEach(ball);
+    frontF.forEach(function (i) { face(i, glass ? 0.3 : 1, false); });
+    edges(frontE, false, lw);
+    outNear.forEach(ball);
+    if (labelOk) rimLabel(ctx, M, P, W, H, lw, col, true);
+  }
+  // 뚫린 곳: 테두리 빨간 점선(2D일 때) + "뚫린 곳" 글자
+  function rimLabel(ctx, M, P, W, H, lw, col, drawLine) {
+    var sx = 0, top = 1e9, cnt = 0;
+    if (drawLine) { ctx.setLineDash([10, 7]); ctx.strokeStyle = col.bad; ctx.lineWidth = lw * 1.7; ctx.beginPath(); }
+    M.E.forEach(function (e) {
+      if (e.f.length > 1) return;
+      var a = P[e.a], b = P[e.b];
+      if (drawLine) { ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); }
+      sx += a.x + b.x; cnt += 2; top = Math.min(top, a.y, b.y);
+    });
+    if (drawLine) { ctx.stroke(); ctx.setLineDash([]); }
+    if (!cnt) return;
+    var fs = Math.max(16, Math.min(W, H) * 0.045), lx = sx / cnt, ly = Math.max(fs + 4, top - 14);
+    ctx.font = fs + 'px ' + css('--display'); ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    ctx.lineWidth = 5; ctx.strokeStyle = col.panel; ctx.strokeText('뚫린 곳', lx, ly); ctx.fillStyle = col.bad; ctx.fillText('뚫린 곳', lx, ly);
+  }
+  // 공 넣기 · 뒤집기 · 비우기 단추 (무대 왼쪽 위)
+  function BallUI(S) {
+    var row = el('div', 'corner-row', '<button class="corner mball"></button><button class="corner mflip"></button><button class="corner mclear">비우기</button>');
+    S.el.appendChild(row);
+    var bB = row.querySelector('.mball'), bF = row.querySelector('.mflip'), bC = row.querySelector('.mclear'), U = { sim: null, row: row };
+    function set(e, k, v) { if (e[k] !== v) e[k] = v; }
+    U.label = function () {
+      var m = U.sim; if (!m) return;
+      set(bB, 'textContent', m.closed ? (m.count() ? '공 더 넣기 ⚽' : '안에 공 넣기 ⚽') : (m.count() ? '공 더 넣기 ⚽' : '공 넣기 ⚽'));
+      set(bB, 'disabled', !m.upright());
+      set(bF, 'textContent', m.flipped() ? '바로 세우기 ↺' : '뒤집기 ↻');
+      set(bC, 'hidden', !m.count());
+    };
+    bB.onclick = function () { if (U.sim) { U.sim.add(); U.label(); } };
+    bF.onclick = function () { if (U.sim) { U.sim.flip(); U.label(); } };
+    bC.onclick = function () { if (U.sim) { U.sim.clear(); U.label(); } };
+    U.set = function (M) { U.sim = (M.box || M.ballBox) ? BallSim(M) : null; row.hidden = !U.sim; U.label(); return U.sim; };
+    return U;
   }
 
   // ================= 분류 장면 (장면 1, 장면 4) =================
@@ -909,7 +1005,7 @@ button.cand.no { opacity: .55; }
     // 크게 보기 창
     var modal = el('div', 'modal', '<div class="mbox"><div class="mhead"><h3></h3><button class="mprev" aria-label="이전 도형">◀</button><button class="mnext" aria-label="다음 도형">▶</button><button class="mclose" aria-label="닫기">✕ 닫기</button></div><div class="mstage"></div><div class="mwhy" hidden></div><div class="mbtns"></div></div>');
     modal.hidden = true; main.appendChild(modal);
-    var MS = Stage(modal.querySelector('.mstage')), mStamp = MS.add('stamp'), mBallRow = el('div', 'corner-row', '<button class="corner mball">공 넣기 ⚽</button><button class="corner mclear" hidden>비우기</button>'), mBall = mBallRow.querySelector('.mball'), mClear = mBallRow.querySelector('.mclear'), mWhy = modal.querySelector('.mwhy'); MS.el.appendChild(mBallRow);
+    var MS = Stage(modal.querySelector('.mstage')), mStamp = MS.add('stamp'), mWhy = modal.querySelector('.mwhy'), BU = BallUI(MS);
     var chooseBtns = cfg.bins.map(function (b) {
       var btn = el('button', 'choose ' + b.cls, b.btn + ' <kbd>' + b.keys[0].toUpperCase() + '</kbd>'); btn.dataset.id = b.id;
       btn.onclick = function () { choose(b.id); }; modal.querySelector('.mbtns').appendChild(btn); return btn;
@@ -927,8 +1023,7 @@ button.cand.no { opacity: .55; }
       var left = cards.filter(function (x) { return x.at === 'pool'; }).length;
       modal.querySelector('h3').innerHTML = (C.k + 1) + '번 도형' + (st.revealed ? ' · ' + C.it.name : '') + ' <small>남은 도형 ' + left + '개</small>';
       MS.reset(C.pitch); MS.el.querySelector('.hint').hidden = !!C.M.box;
-      st.sim = C.M.box ? BallSim(C.M) : null;
-      mBallRow.hidden = !C.M.box; mBall.textContent = '공 넣기 ⚽'; mClear.hidden = true;
+      st.sim = BU.set(C.M);
       var ab = binOf(C.it.ans);
       mStamp.className = st.revealed ? 'stamp ' + (ab.cls === 'no' || ab.cls === 'b2' ? 'no' : 'yes') : 'stamp'; mStamp.textContent = st.revealed ? ab.stamp : '';
       mWhy.hidden = !(st.revealed && C.it.why);
@@ -965,8 +1060,6 @@ button.cand.no { opacity: .55; }
       var nx = nextOf(C, 1, true);
       if (nx && nx !== C) slideTo(nx, 1); else setTimeout(closeModal, 350);
     }
-    mBall.onclick = function () { if (!st.sim) return; st.sim.add(); mBall.textContent = '공 더 넣기 ⚽'; mClear.hidden = false; };
-    mClear.onclick = function () { if (!st.sim) return; st.sim.clear(); mBall.textContent = '공 넣기 ⚽'; mClear.hidden = true; };
     modal.querySelector('.mclose').onclick = closeModal;
     modal.querySelector('.mprev').onclick = function () { if (st.modal) slideTo(nextOf(st.modal, -1, false), -1); };
     modal.querySelector('.mnext').onclick = function () { if (st.modal) slideTo(nextOf(st.modal, 1, false), 1); };
@@ -985,7 +1078,7 @@ button.cand.no { opacity: .55; }
     return {
       frame: function (dt, col) {
         cards.forEach(function (C) { if (!C.el.classList.contains('dragging')) C.yaw += dt * 0.00035; if (fit(C.cv)) render(C.cv, C.M, C.yaw, C.pitch, 0.4, 2, col); });
-        if (st.modal && MS.tick(dt)) { if (st.sim) st.sim.step(dt); render(MS.cv, st.sim ? st.sim.mesh() : st.modal.M, MS.mat, 0, 0.42, 3, col); }
+        if (st.modal && MS.tick(dt)) { if (st.sim) { st.sim.step(dt); BU.label(); renderSim(MS.cv, st.sim, MS.mat, 0, 0.42, 3, col); } else render(MS.cv, st.modal.M, MS.mat, 0, 0.42, 3, col); }
       },
       primary: function () { if (st.modal) return; bRev.onclick(); },
       unmount: function () { document.removeEventListener('keydown', onKey); }
@@ -1050,8 +1143,7 @@ button.cand.no { opacity: .55; }
   function sceneDefine(main) {
     main.appendChild(el('div', 'scene-head', '<h2>다면체의 뜻을 만들어 봐요</h2>'));
     var two = el('div', 'two'); main.appendChild(two);
-    var S = Stage(two), tag = S.add('tag'), stamp = S.add('stamp'), ballRow = el('div', 'corner-row', '<button class="corner mball">공 넣기 ⚽</button><button class="corner mclear" hidden>비우기</button>'), ballBtn = ballRow.querySelector('.mball'), clearBtn = ballRow.querySelector('.mclear');
-    S.el.appendChild(ballRow);
+    var S = Stage(two), tag = S.add('tag'), stamp = S.add('stamp'), BU = BallUI(S);
     var panel = el('div', 'panel'); two.appendChild(panel);
     var st = { key: 'cylinder', ball: null, open: {} };
     panel.appendChild(el('p', 'lead', '다면체가 <b>아닌 도형(✕)</b>을 먼저 보면서, 빈칸에 들어갈 조건을 추론해 보세요.'));
@@ -1067,11 +1159,10 @@ button.cand.no { opacity: .55; }
     row.appendChild(bReset); panel.appendChild(row);
     function show(key) {
       st.key = key; var poly = SH[key][1], M = mesh(key);
-      st.sim = M.box ? BallSim(M) : null;
+      st.sim = BU.set(M);
       S.reset(M.box ? 0.9 : M.open ? 0.62 : 0.42);
       tag.textContent = SH[key][0];
       stamp.className = 'stamp ' + (poly ? 'yes' : 'no'); stamp.textContent = poly ? '다면체 ○' : '다면체가 아니에요 ✕'; anim(stamp, 'pop');
-      ballRow.hidden = !M.box; ballBtn.textContent = '공 넣기 ⚽'; clearBtn.hidden = true;
       S.el.querySelector('.hint').hidden = !!M.box;
       Array.prototype.forEach.call(exrow.children, function (b) { b.classList.toggle('sel', b.dataset.key === key); });
     }
@@ -1086,12 +1177,10 @@ button.cand.no { opacity: .55; }
       var id = b.dataset.id;
       st.open[id] = !st.open[id]; draw(st.open[id] ? id : null);
     });
-    ballBtn.onclick = function () { if (!st.sim) return; st.sim.add(); ballBtn.textContent = '공 더 넣기 ⚽'; clearBtn.hidden = false; };
-    clearBtn.onclick = function () { if (!st.sim) return; st.sim.clear(); ballBtn.textContent = '공 넣기 ⚽'; clearBtn.hidden = true; };
     bReset.onclick = function () { st.open = {}; draw(); };
     draw(); show('cylinder');
     return {
-      frame: function (dt, col) { if (S.tick(dt)) { if (st.sim) st.sim.step(dt); render(S.cv, st.sim ? st.sim.mesh() : mesh(st.key), S.mat, 0, 0.42, 3, col); } },
+      frame: function (dt, col) { if (S.tick(dt)) { if (st.sim) { st.sim.step(dt); BU.label(); renderSim(S.cv, st.sim, S.mat, 0, 0.42, 3, col); } else render(S.cv, mesh(st.key), S.mat, 0, 0.42, 3, col); } },
       primary: function () { var next = CLAUSE.filter(function (c) { return !st.open[c.id]; })[0]; if (next) { st.open[next.id] = true; draw(next.id); } }
     };
   }
@@ -1914,6 +2003,17 @@ button.cand.no { opacity: .55; }
     { sec: 4, title: '도전: 이면체 · 삼면체', mount: sceneWhy4, ws: '도전문제' },
     { sec: 4, title: '도전: 팔면체도 층으로', mount: sceneOcta, ws: '도전 +' }
   ];
+  // ---- three.js 엔진 (시범): 머리의 체크박스로 켜고 끈다. 켜면 engine3d.js를 그때 불러온다 ----
+  var G3 = null, USE3D = false;
+  function use3d(cv) { return USE3D && G3 && cv._box; }
+  function set3D(on) {
+    var box = $('eng3d');
+    if (!on) { USE3D = false; box.checked = false; if (G3) G3.hide(); try { localStorage.setItem('eng3d', '0'); } catch (e) {} return; }
+    import('./engine3d.js').then(function (m) { G3 = m; USE3D = true; box.checked = true; try { localStorage.setItem('eng3d', '1'); } catch (e) {} })
+      .catch(function () { USE3D = false; box.checked = false; $('eng3d-msg').hidden = false; setTimeout(function () { $('eng3d-msg').hidden = true; }, 6000); });
+  }
+  $('eng3d').onchange = function () { set3D(this.checked); };
+  try { if (localStorage.getItem('eng3d') === '1') set3D(true); } catch (e) {}
   var cur = -1, active = null;
   function go(k) {
     if (k < 0 || k >= SCENES.length || k === cur) return;
