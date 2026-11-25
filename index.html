@@ -272,6 +272,7 @@ button.cand.no { opacity: .55; }
 .eng3d input { width: 20px; height: 20px; }
 .eng3d small { font-family: var(--body); font-size: 12px; background: #fff4cc; color: #7a5b00; border-radius: 999px; padding: 0 6px; }
 .eng3d-msg { font-size: 14px; color: var(--bad); }
+#ft .eng3d { margin-right: 6px; }
 .corner-row button:disabled { opacity: .4; }
 </style>
 </head>
@@ -280,13 +281,13 @@ button.cand.no { opacity: .55; }
   <div class="brand">다면체 1차시<small>교사 시연용 · ← → 키로 넘기기</small></div>
   <nav id="secs" aria-label="단원"></nav>
   <nav id="dots" aria-label="장면"></nav>
-  <label class="eng3d" title="three.js로 그리기 (시범). 지금은 일반 도형과 공 넣기 장면에 적용돼요"><input type="checkbox" id="eng3d"> 3D 엔진 <small>시범</small></label>
-  <span id="eng3d-msg" class="eng3d-msg" hidden>3D 엔진은 인터넷 주소(GitHub Pages)로 열 때만 돼요</span>
 </header>
 <main id="scene"></main>
 <footer id="ft">
   <button type="button" id="prev">← 이전</button>
   <span id="stitle"></span>
+  <label class="eng3d" title="three.js로 그리기 (시범). 각뿔 자르기의 칼날, 각뿔대의 늘린 모서리, 카드 작은 그림은 2D로 그려요"><input type="checkbox" id="eng3d"> 3D 엔진 <small>시범</small></label>
+  <span id="eng3d-msg" class="eng3d-msg" hidden>3D 엔진은 인터넷 주소(GitHub Pages)로 열 때만 돼요</span>
   <button type="button" id="next" class="primary">다음 →</button>
 </footer>
 <script>
@@ -692,11 +693,14 @@ button.cand.no { opacity: .55; }
     var P = M.V.map(function (v) { var r = rot(v[0] - M.c[0], v[1] - M.c[1], v[2] - M.c[2]); return { x: ox + r[0] * sc, y: oy - r[1] * sc, z: r[2] }; });
     var NN = M.N.map(function (n) { return rot(n[0], n[1], n[2]); }), front = NN.map(function (n) { return n[2] > 0; });
     var sel = {}; ids.forEach(function (id, k) { sel[id] = k + 1; });
+    var out = use3d(cv) ? { faces: [], segs: [] } : null;
+    if (!out && G3 && cv._box) G3.hide();
     var depth = M.F.map(function (f) { var z = 0; f.forEach(function (k) { z += P[k].z; }); return z / f.length; });
     var order = M.F.map(function (f, i) { return i; }).sort(function (a, b) { return (front[a] - front[b]) || (depth[a] - depth[b]); });
     order.forEach(function (i) {
       var f = M.F[i], n = NN[i], isSel = mode === 'face' && sel[i];
       var lam = Math.max(0, n[0] * LIGHT[0] + n[1] * LIGHT[1] + n[2] * LIGHT[2]), k = 0.62 + 0.42 * lam;
+      if (out) { out.faces[i] = [isSel ? col.face : 'rgb(' + col.base.join(',') + ')', isSel ? (front[i] ? 0.85 : 0.45) : (front[i] ? 0.7 : 0.16)]; return; }
       ctx.beginPath(); f.forEach(function (v, j) { j ? ctx.lineTo(P[v].x, P[v].y) : ctx.moveTo(P[v].x, P[v].y); }); ctx.closePath();
       ctx.globalAlpha = isSel ? (front[i] ? 0.85 : 0.45) : (front[i] ? 0.6 : 0.16);
       ctx.fillStyle = isSel ? col.face : 'rgb(' + col.base.map(function (c) { return Math.min(255, Math.round(c * k)); }).join(',') + ')';
@@ -705,11 +709,13 @@ button.cand.no { opacity: .55; }
     ctx.lineCap = 'round';
     M.E.forEach(function (e, ei) {
       var hidden = !e.f.some(function (g) { return front[g]; }), isSel = mode === 'edge' && sel[ei];
+      if (out) { out.segs.push({ a: M.V[e.a], b: M.V[e.b], color: isSel ? col.edge : hidden ? col.muted : col.fg, w: isSel ? 7 : hidden ? 2 : 3, dash: hidden && !isSel, alpha: 1 }); return; }
       ctx.beginPath(); ctx.moveTo(P[e.a].x, P[e.a].y); ctx.lineTo(P[e.b].x, P[e.b].y);
       ctx.setLineDash(hidden && !isSel ? [8, 7] : []);
       ctx.strokeStyle = isSel ? col.edge : hidden ? col.muted : col.fg; ctx.lineWidth = isSel ? 7 : hidden ? 2 : 3;
       ctx.stroke(); ctx.setLineDash([]);
     });
+    if (out) G3.drawStyled(cv, { M: M, mat: Array.isArray(yaw) ? yaw : matFromYP(yaw, pitch), frac: frac, faces: out.faces, segs: out.segs });
     if (mode === 'vertex') {
       M.V.forEach(function (v, vi) {
         var hidden = !M.VF[vi].some(function (g) { return front[g]; }), isSel = sel[vi];
@@ -1561,10 +1567,14 @@ button.cand.no { opacity: .55; }
     var t = Math.min(1, (performance.now() - animT0) / 950), p = 1 - Math.pow(1 - t, 2);
     var pNow = function (s) { return s === step ? p : 1; };
     var vCount = {}; L.vL.forEach(function (s) { vCount[s] = (vCount[s] || 0) + 1; });
+    var out = use3d(cv) ? { faces: M.F.map(function () { return null; }), segs: [] } : null;   // three.js: 면·선은 모아서 넘기고, 점만 여기서 그린다
+    function seg(a, b, color, w, dash, alpha, fr) { var bb = fr == null ? b : [a[0] + (b[0] - a[0]) * fr, a[1] + (b[1] - a[1]) * fr, a[2] + (b[2] - a[2]) * fr]; out.segs.push({ a: a, b: bb, color: color, w: w, dash: dash, alpha: alpha }); }
+    if (!out && G3 && cv._box) G3.hide();
     var rgb = function (s) { return 'rgb(' + L.col[s] + ')'; };
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     if (!mono) M.E.forEach(function (e, ei) {   // 아직 쌓지 않은 부분: 연한 점선 안내선
       if (L.eL[ei] <= step) return;
+      if (out) { seg(M.V[e.a], M.V[e.b], col.muted, 1.8, true, 0.25); return; }
       ctx.beginPath(); ctx.moveTo(P[e.a].x, P[e.a].y); ctx.lineTo(P[e.b].x, P[e.b].y);
       ctx.setLineDash([5, 6]); ctx.strokeStyle = col.muted; ctx.globalAlpha = 0.25; ctx.lineWidth = 1.8;
       ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
@@ -1574,19 +1584,29 @@ button.cand.no { opacity: .55; }
     order.forEach(function (i) {
       var f = M.F[i], nn = NN[i], sg = front[i] ? 1 : -1, s = L.fL[i];
       var lam = Math.max(0, sg * (nn[0] * LIGHT[0] + nn[1] * LIGHT[1] + nn[2] * LIGHT[2])), k = 0.72 + 0.28 * lam;
-      var base = mono ? '236, 240, 246' : L.col[s];
+      var base = mono ? '250, 251, 253' : L.col[s];
       var c = base.split(',').map(function (x) { return Math.min(255, Math.round(Number(x) * k)); }).join(',');
       ctx.beginPath(); f.forEach(function (v, j) { j ? ctx.lineTo(P[v].x, P[v].y) : ctx.moveTo(P[v].x, P[v].y); }); ctx.closePath();
       var a = mono ? (front[i] ? 0.85 : 0) : front[i] ? (s === step ? 0.5 : 0.32) : 0.16;
       var fade = Math.max(0, (pNow(s) - 0.4) / 0.6);
+      if (out) { out.faces[i] = a * fade > 0.005 ? ['rgb(' + base + ')', mono ? a * fade * 0.75 : Math.min(1, a * fade * 1.25)] : null; return; }
       ctx.globalAlpha = a * fade; ctx.fillStyle = 'rgb(' + c + ')'; ctx.fill(); ctx.globalAlpha = 1;
     });
     var ring = {};
     M.E.forEach(function (e, ei) { if (L.vL[e.a] === L.vL[e.b]) (ring[L.eL[ei]] = ring[L.eL[ei]] || []).push(ei); });
     M.E.forEach(function (e, ei) {
       var s = L.eL[ei]; if (s > step) return;
-      var pa = P[e.a], pb = P[e.b], cur = s === step && !mono;
+      var pa = P[e.a], pb = P[e.b], ma = M.V[e.a], mb = M.V[e.b], cur = s === step && !mono;
       var hidden = (mono || step >= L.max) && !e.f.some(function (g) { return front[g]; });
+      if (out) {
+        var c3 = cur ? rgb(s) : col.fg, w3 = cur ? 5 : mono ? 3 : 2.8, fr3 = null;
+        if (s === step && p < 1) {
+          if (L.vL[e.a] !== L.vL[e.b]) { if (L.vL[e.a] > L.vL[e.b]) { var t3 = ma; ma = mb; mb = t3; } fr3 = p; }
+          else { var R3 = ring[s] || [ei]; fr3 = Math.max(0, Math.min(1, p * R3.length - R3.indexOf(ei))); }
+          if (fr3 <= 0) return;
+        }
+        seg(ma, mb, c3, w3, hidden && !cur, 1, fr3); return;
+      }
       ctx.strokeStyle = cur ? rgb(s) : col.fg; ctx.lineWidth = cur ? 5 : mono ? 3 : 2.8;
       ctx.setLineDash(hidden && !cur ? [7, 6] : []);
       if (s === step && p < 1) {
@@ -1599,6 +1619,7 @@ button.cand.no { opacity: .55; }
       }
       ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y); ctx.stroke(); ctx.setLineDash([]);
     });
+    if (out) G3.drawStyled(cv, { M: M, mat: Array.isArray(yaw) ? yaw : matFromYP(yaw, pitch), frac: frac, faces: out.faces, segs: out.segs });
     M.V.forEach(function (v, vi) {
       var s = L.vL[vi]; if (s > step) return;
       var cur = s === step, rad = mono ? 4 : cur ? 8 : 5.5;
@@ -1859,7 +1880,7 @@ button.cand.no { opacity: .55; }
     body.addEventListener('click', function (e) { var b = e.target.closest('.cand'); if (!b) return; var i = Number(b.dataset.i); st.pick[i] = st.pick[i] ? 0 : 1; if (!st.pick[i]) delete st.pick[i]; draw(); });
     draw();
     return {
-      frame: function (dt, col) { if (S.tick(dt)) { if (st.M) drawLayers(S.cv, st.M, 3, 0, S.mat, 0, 0.4, col); else { var c = S.cv.getContext('2d'); c.setTransform(S.cv._d, 0, 0, S.cv._d, 0, 0); c.clearRect(0, 0, S.cv._w, S.cv._h); } } },
+      frame: function (dt, col) { if (S.tick(dt)) { if (st.M) drawLayers(S.cv, st.M, 3, 0, S.mat, 0, 0.4, col); else { var c = S.cv.getContext('2d'); c.setTransform(S.cv._d, 0, 0, S.cv._d, 0, 0); c.clearRect(0, 0, S.cv._w, S.cv._h); if (G3) G3.hide(); } } },
       primary: step
     };
   }

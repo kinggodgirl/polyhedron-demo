@@ -19,7 +19,7 @@ scene.add(sun);
 const root = new THREE.Group(); root.matrixAutoUpdate = false; scene.add(root);
 const boxG = new THREE.Group(); boxG.matrixAutoUpdate = false; root.add(boxG);
 
-const ballMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+const ballMat = new THREE.MeshPhongMaterial({ color: 0xffffff, shininess: 60, specular: 0x555555 });   // 반짝이는 점이 있어야 둥글게 보인다
 const balls = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 28, 18), ballMat, 96);
 balls.count = 0; balls.frustumCulled = false; root.add(balls);
 
@@ -107,7 +107,10 @@ export function draw(cv, spec) {
   const front = M.N.map((n) => v.set(n[0], n[1], n[2]).applyMatrix3(nm).z > 0);
   const visE = [], hidE = [];
   M.E.forEach((e) => {
-    if (!e.sharp) return;
+    if (!e.sharp) {   // 곡면: 앞면과 뒷면이 만나는 곳이 윤곽선 (원기둥의 양옆 세로선 등)
+      if (!M.open && e.f.length === 2 && front[e.f[0]] !== front[e.f[1]]) visE.push(e);
+      return;
+    }
     if (M.open) { visE.push(e); return; }
     (e.f.some((g) => front[g]) ? visE : hidE).push(e);
   });
@@ -134,6 +137,77 @@ export function draw(cv, spec) {
   balls.instanceMatrix.needsUpdate = true;
 
   renderer.render(scene, camera);
+  return true;
+}
+
+// ---- 꾸민 그리기 (층 쌓기 · 직접 세기 장면) ----
+// spec: { M, mat, frac, faces: [[css색, 투명도] 또는 null …(면마다)], segs: [{ a, b, color, w, dash, alpha }] }
+// 꼭짓점과 번호 동그라미는 index.html이 위의 2D 캔버스에 그린다 (투영이 같으므로 위치가 맞는다).
+const styledG = new THREE.Group(); styledG.matrixAutoUpdate = false; styledG.visible = false; scene.add(styledG);
+const sCache = new WeakMap();
+const linePool = new Map();
+let sCurrent = null;
+function buildStyled(M) {
+  const pos = [], nor = [], fid = [];
+  M.F.forEach((f, i) => {
+    for (let k = 1; k < f.length - 1; k++) [0, k, k + 1].forEach((j) => { const v = M.V[f[j]], n = M.N[i]; pos.push(v[0], v[1], v[2]); nor.push(n[0], n[1], n[2]); fid.push(i); });
+  });
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(fid.length * 4), 4));
+  const mesh = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide }));
+  mesh.frustumCulled = false;
+  const o = { mesh, fid, key: '' }; sCache.set(M, o); return o;
+}
+const tmpC = new THREE.Color();
+export function drawStyled(cv, spec) {
+  const box = cv._box; if (!box) return false;
+  const W = cv._w, H = cv._h, d = cv._d;
+  if (renderer.domElement.parentNode !== box) box.insertBefore(renderer.domElement, cv);
+  renderer.domElement.style.display = '';
+  if (renderer.getPixelRatio() !== d) renderer.setPixelRatio(d);
+  const sz = renderer.getSize(new THREE.Vector2());
+  if (sz.x !== W || sz.y !== H) renderer.setSize(W, H, false);
+  const M = spec.M, c = M.c, sc = Math.min(W, H) * spec.frac / M.R;
+  camera.left = -W / 2 / sc; camera.right = W / 2 / sc; camera.top = H / 2 / sc; camera.bottom = -H / 2 / sc; camera.updateProjectionMatrix();
+  styledG.matrix.copy(mat4From3(spec.mat)).multiply(new THREE.Matrix4().makeTranslation(-c[0], -c[1], -c[2]));
+  styledG.matrixWorldNeedsUpdate = true;
+  root.visible = false; styledG.visible = true;
+  const o = sCache.get(M) || buildStyled(M);
+  if (sCurrent !== o) { if (sCurrent) styledG.remove(sCurrent.mesh); styledG.add(o.mesh); sCurrent = o; }
+  // 면 색 (바뀔 때만 다시 씀)
+  const fk = spec.faces.map((x) => x ? x[0] + x[1].toFixed(2) : '-').join('|');
+  if (fk !== o.key) {
+    const a = o.mesh.geometry.attributes.color;
+    for (let i = 0; i < o.fid.length; i++) {
+      const x = spec.faces[o.fid[i]];
+      if (x) { tmpC.set(x[0]); a.setXYZW(i, tmpC.r, tmpC.g, tmpC.b, x[1]); } else a.setXYZW(i, 0, 0, 0, 0);
+    }
+    a.needsUpdate = true; o.key = fk;
+  }
+  // 선: 모양(색 · 굵기 · 점선 · 투명도)이 같은 것끼리 묶어서 그림
+  const groups = new Map();
+  spec.segs.forEach((g) => { const k = g.color + '|' + g.w + '|' + (g.dash ? 1 : 0) + '|' + (g.alpha == null ? 1 : g.alpha); (groups.get(k) || groups.set(k, []).get(k)).push(g); });
+  linePool.forEach((L) => { L.visible = false; });
+  const px = 1 / sc;
+  let order = 10;
+  groups.forEach((list, k) => {
+    let L = linePool.get(k);
+    if (!L) {
+      const [color, w, dash, alpha] = k.split('|');
+      L = new LineSegments2(new LineSegmentsGeometry(), lineMat({ color: new THREE.Color(color), linewidth: Number(w), dashed: dash === '1', depthTest: false, transparent: Number(alpha) < 1, opacity: Number(alpha) }));
+      L.frustumCulled = false; L.key = ''; linePool.set(k, L); styledG.add(L);
+    }
+    const arr = []; list.forEach((g) => arr.push(g.a[0], g.a[1], g.a[2], g.b[0], g.b[1], g.b[2]));
+    const pk = arr.map((v) => v.toFixed(4)).join(',');
+    if (pk !== L.key) { L.geometry.dispose(); L.geometry = new LineSegmentsGeometry(); L.geometry.setPositions(arr); if (L.material.dashed) L.computeLineDistances(); L.key = pk; }
+    L.material.resolution.set(W, H);
+    if (L.material.dashed) { L.material.dashSize = 7 * px; L.material.gapSize = 6 * px; }
+    L.renderOrder = order++; L.visible = true;
+  });
+  renderer.render(scene, camera);
+  root.visible = true; styledG.visible = false;
   return true;
 }
 export function hide() { renderer.domElement.style.display = 'none'; }
