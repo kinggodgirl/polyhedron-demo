@@ -209,6 +209,8 @@ button.cnt.vertex { border-color: var(--vertex); color: var(--vertex); } button.
 .layer-badge.l1 { background: #e7f1fd; color: var(--edge); }
 .layer-badge.l2 { background: #fff3ea; color: var(--face); }
 .layer-badge.l3 { background: #f1edfd; color: var(--vertex); }
+.ctab td.nb { color: var(--line); }
+.ctab td.sumc { font-size: .9em; }
 </style>
 </head>
 <body>
@@ -1223,158 +1225,167 @@ button.cnt.vertex { border-color: var(--vertex); color: var(--vertex); } button.
     };
   }
 
-  // ================= 장면 8: 층으로 나누어 세기 =================
-  function drawLayers(cv, kind, n, layer, animT0, yaw, pitch, frac, col) {
-    var M = solid(kind, n);
-    prep(M);
+  // ================= 장면 8: 층마다 세기 (1층 · 2층 · 층 사이) =================
+  // 1층 = 아래 다각형, 2층 = 위 다각형(각뿔이면 점 하나), 층 사이 = 두 층을 잇는 모서리와 옆면
+  var LCOL = { 1: '28, 126, 214', 2: '112, 72, 232', 3: '232, 89, 12' };   // 1층 파랑 · 2층 보라 · 층 사이 주황
+  function layerSolid(n, s) {
+    var M = finish(extrude(regular(n, 1), 1.6, { top: s }));
+    M.c = [0, 0, 0]; M.R = Math.hypot(1, 0.8);   // 윗층 크기를 바꿔도 화면 크기가 흔들리지 않게
+    return prep(M);
+  }
+  function drawLayers(cv, M, layer, animT0, yaw, pitch, frac, col) {
     var ctx = cv.getContext('2d'), W = cv._w, H = cv._h, d = cv._d;
     ctx.setTransform(d, 0, 0, d, 0, 0); ctx.clearRect(0, 0, W, H);
     var sc = Math.min(W, H) * frac / M.R, ox = W / 2, oy = H / 2, rot = rotFn(yaw, pitch);
     var P = M.V.map(function (v) { var r = rot(v[0] - M.c[0], v[1] - M.c[1], v[2] - M.c[2]); return { x: ox + r[0] * sc, y: oy - r[1] * sc, z: r[2] }; });
     var NN = M.N.map(function (nn) { return rot(nn[0], nn[1], nn[2]); }), front = NN.map(function (nn) { return nn[2] > 0; });
-    var vLayer = M.V.map(function (v) { return v[1] < 0 ? 1 : 3; });
-    var fLayer = M.N.map(function (nn) { return nn[1] < -0.9 ? 1 : nn[1] > 0.9 ? 3 : 2; });
-    var eLayer = M.E.map(function (e) {
-      var la = vLayer[e.a], lb = vLayer[e.b];
-      return la === 1 && lb === 1 ? 1 : (la === 3 && lb === 3 ? 3 : 2);
-    });
-    var elapsed = performance.now() - animT0;
-    var p2 = layer === 2 ? Math.min(1, elapsed / 950) : 1;
-    p2 = 1 - Math.pow(1 - p2, 2);
-    var p3 = layer === 3 ? Math.min(1, elapsed / 900) : 1;
-    p3 = 1 - Math.pow(1 - p3, 2);
-    var p3Face = layer === 3 ? Math.max(0, Math.min(1, (p3 - 0.2) / 0.8)) : 1;
-    // 1) 아직 안 쌓은 부분은 연한 점선 가이드로
+    var vL = M.V.map(function (v) { return v[1] < 0 ? 1 : 2; });
+    var fL = M.N.map(function (nn) { return nn[1] < -0.9 ? 1 : nn[1] > 0.9 ? 2 : 3; });
+    var eL = M.E.map(function (e) { var a = vL[e.a], b = vL[e.b]; return a === b ? a : 3; });
+    var t = Math.min(1, (performance.now() - animT0) / 950), p = 1 - Math.pow(1 - t, 2);
+    var pNow = function (L) { return L === layer ? p : 1; };
     ctx.lineCap = 'round';
+    // 1) 아직 쌓지 않은 부분은 연한 점선 안내선
     M.E.forEach(function (e, ei) {
-      if (eLayer[ei] <= layer) return;
+      if (eL[ei] <= layer) return;
       ctx.beginPath(); ctx.moveTo(P[e.a].x, P[e.a].y); ctx.lineTo(P[e.b].x, P[e.b].y);
       ctx.setLineDash([5, 6]); ctx.strokeStyle = col.muted; ctx.globalAlpha = 0.25; ctx.lineWidth = 1.8;
       ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
     });
-    // 2) 쌓인 층의 면 그리기 (2층에서는 선만 보여주고, 3층에서 옆면과 윗면이 부드럽게 채워짐)
-    var maxFaceLayer = layer === 2 ? 1 : layer;
+    // 2) 쌓인 층의 면 (방금 쌓은 층은 서서히 채워짐)
     var depth = M.F.map(function (f) { var z = 0; f.forEach(function (k) { z += P[k].z; }); return z / f.length; });
-    var order = M.F.map(function (f, i) { return i; }).filter(function (i) { return fLayer[i] <= maxFaceLayer; }).sort(function (a, b) { return (front[a] - front[b]) || (depth[a] - depth[b]); });
-    var fColors = { 1: '28, 126, 214', 2: '232, 89, 12', 3: '112, 72, 232' };
+    var order = M.F.map(function (f, i) { return i; }).filter(function (i) { return fL[i] <= layer; }).sort(function (a, b) { return (front[a] - front[b]) || (depth[a] - depth[b]); });
     order.forEach(function (i) {
       var f = M.F[i], nn = NN[i], sg = front[i] ? 1 : -1;
       var lam = Math.max(0, sg * (nn[0] * LIGHT[0] + nn[1] * LIGHT[1] + nn[2] * LIGHT[2])), k = 0.72 + 0.28 * lam;
-      var rgb = fColors[fLayer[i]].split(',').map(function (x) { return Math.min(255, Math.round(Number(x) * k)); }).join(',');
+      var rgb = LCOL[fL[i]].split(',').map(function (x) { return Math.min(255, Math.round(Number(x) * k)); }).join(',');
       ctx.beginPath(); f.forEach(function (v, j) { j ? ctx.lineTo(P[v].x, P[v].y) : ctx.moveTo(P[v].x, P[v].y); }); ctx.closePath();
-      var baseAlpha = front[i] ? (fLayer[i] === layer ? 0.55 : 0.34) : 0.16;
-      ctx.globalAlpha = (layer === 3 && fLayer[i] >= 2) ? baseAlpha * p3Face : baseAlpha;
-      ctx.fillStyle = 'rgb(' + rgb + ')'; ctx.fill(); ctx.globalAlpha = 1;
+      var a = front[i] ? (fL[i] === layer ? 0.5 : 0.32) : 0.16;
+      var fade = fL[i] === 3 ? Math.max(0, (pNow(3) - 0.35) / 0.65) : Math.max(0, (pNow(fL[i]) - 0.5) / 0.5);
+      ctx.globalAlpha = a * fade; ctx.fillStyle = 'rgb(' + rgb + ')'; ctx.fill(); ctx.globalAlpha = 1;
     });
-    // 3) 쌓인 층의 모서리 그리기 (2층: 아래→위로 올라옴, 3층: 윗면 모서리가 차례로 그려짐)
-    var eColors = { 1: col.edge, 2: col.face, 3: col.vertex };
-    var topEdges = [];
-    M.E.forEach(function (e, ei) { if (eLayer[ei] === 3) topEdges.push(ei); });
+    // 3) 쌓인 층의 모서리: 1·2층은 둘레를 차례로 그리고, 층 사이는 아래에서 위로 올라감
+    var ring = { 1: [], 2: [] };
+    M.E.forEach(function (e, ei) { if (eL[ei] < 3) ring[eL[ei]].push(ei); });
     M.E.forEach(function (e, ei) {
-      if (eLayer[ei] > layer) return;
-      var pa = P[e.a], pb = P[e.b];
-      if (eLayer[ei] === 2 && layer === 2) {
-        var bot = vLayer[e.a] === 1 ? pa : pb, top = vLayer[e.a] === 1 ? pb : pa;
-        var tipX = bot.x + (top.x - bot.x) * p2, tipY = bot.y + (top.y - bot.y) * p2;
-        ctx.beginPath(); ctx.moveTo(bot.x, bot.y); ctx.lineTo(tipX, tipY);
-        ctx.setLineDash([]); ctx.strokeStyle = col.face; ctx.lineWidth = 5; ctx.stroke();
+      var L = eL[ei]; if (L > layer) return;
+      var pa = P[e.a], pb = P[e.b], cur = L === layer, w = cur ? 5 : 2.8;
+      ctx.strokeStyle = cur ? 'rgb(' + LCOL[L] + ')' : col.fg; ctx.lineWidth = w;
+      if (cur && p < 1) {
+        var fr;
+        if (L === 3) { if (vL[e.a] !== 1) { var tmp = pa; pa = pb; pb = tmp; } fr = p; }
+        else { var idx = ring[L].indexOf(ei); fr = Math.max(0, Math.min(1, p * ring[L].length - idx)); }
+        if (fr <= 0) return;
+        ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pa.x + (pb.x - pa.x) * fr, pa.y + (pb.y - pa.y) * fr); ctx.setLineDash([]); ctx.stroke();
         return;
       }
-      if (eLayer[ei] === 3 && layer === 3 && p3 < 1) {
-        var idx = topEdges.indexOf(ei), fracE = Math.max(0, Math.min(1, p3 * topEdges.length - idx));
-        if (fracE <= 0) return;
-        ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pa.x + (pb.x - pa.x) * fracE, pa.y + (pb.y - pa.y) * fracE);
-        ctx.setLineDash([]); ctx.strokeStyle = col.vertex; ctx.lineWidth = 5; ctx.stroke();
-        return;
-      }
-      var hidden = !e.f.some(function (g) { return fLayer[g] <= maxFaceLayer && front[g]; });
+      var hidden = layer >= 3 && !e.f.some(function (g) { return front[g]; });
       ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y);
-      ctx.setLineDash(hidden && layer >= 3 ? [7, 6] : []);
-      ctx.strokeStyle = eLayer[ei] === layer ? eColors[eLayer[ei]] : col.fg;
-      ctx.lineWidth = eLayer[ei] === layer ? 5 : 2.8;
-      ctx.stroke(); ctx.setLineDash([]);
+      ctx.setLineDash(hidden ? [7, 6] : []); ctx.stroke(); ctx.setLineDash([]);
     });
-    // 4) 꼭짓점 그리기 (2층에서는 선이 다 올라온 뒤 위쪽 꼭짓점도 함께 표시)
+    // 4) 꼭짓점 (방금 쌓은 층의 점은 톡 튀어나오며 나타남)
+    var apex = vL.filter(function (x) { return x === 2; }).length === 1;
     M.V.forEach(function (v, vi) {
-      var showV = vLayer[vi] <= layer || (layer === 2 && vLayer[vi] === 3 && p2 >= 0.88);
-      if (!showV) return;
-      var rad = 5.5, isAccent = vLayer[vi] === layer;
-      if (layer === 2 && vLayer[vi] === 3) {
-        var pop = Math.min(1, (p2 - 0.88) / 0.12);
-        rad = 8.5 * pop; isAccent = true;
-      } else if (layer === 3 && vLayer[vi] === 3) {
-        rad = kind === 'pyramid' ? 8.5 + 3.5 * Math.sin(p3 * Math.PI) : 8.5;
-        isAccent = true;
-      }
+      var L = vL[vi]; if (L > layer) return;
+      var cur = L === layer, rad = cur ? 8 : 5.5;
+      if (cur && p < 1) rad *= Math.min(1, p * 1.6);
+      if (cur && apex && L === 2) rad = 9 + 4 * Math.sin(p * Math.PI);
+      if (rad <= 0) return;
       ctx.beginPath(); ctx.arc(P[vi].x, P[vi].y, rad, 0, Math.PI * 2);
-      ctx.fillStyle = isAccent ? col.vertex : col.panel; ctx.fill();
-      ctx.lineWidth = 2.5; ctx.strokeStyle = col.vertex; ctx.stroke();
+      ctx.fillStyle = cur ? 'rgb(' + LCOL[L] + ')' : col.panel; ctx.fill();
+      ctx.lineWidth = 2.5; ctx.strokeStyle = cur ? 'rgb(' + LCOL[L] + ')' : col.fg; ctx.stroke();
     });
   }
   function sceneLayers(main) {
-    main.appendChild(el('div', 'scene-head', '<h2>입체도형을 층으로 나누어 세어 봐요</h2>'));
+    main.appendChild(el('div', 'scene-head', '<h2>층마다 세면 쉬워요 — 1층 · 2층 · 층 사이</h2>'));
     var two = el('div', 'two'); main.appendChild(two);
     var S = Stage(two), big = S.add('big'), tag = S.add('tag');
     var panel = el('div', 'panel'); two.appendChild(panel);
-    var st = { kind: 'prism', n: 4, layer: 1, animT0: performance.now() };
-    var krow = el('div', 'row');
-    [['prism', '각기둥'], ['pyramid', '각뿔'], ['frustum', '각뿔대']].forEach(function (x) {
-      var b = el('button', 'pick mini', x[1]); b.dataset.k = x[0];
-      b.onclick = function () { st.kind = x[0]; st.layer = 1; st.animT0 = performance.now(); update(); };
+    var st = { n: 4, s: 1, layer: 1, animT0: performance.now(), rev: {}, M: null };
+    var COLS3 = [{ k: 1, name: '1층', cls: 'l1' }, { k: 2, name: '2층', cls: 'l3' }, { k: 3, name: '층 사이', cls: 'l2' }];
+    var ROWS3 = [{ m: 'vertex', w: '꼭짓점' }, { m: 'edge', w: '모서리' }, { m: 'face', w: '면' }];
+    var krow = el('div', 'row', '<span class="lab">모양</span>');
+    [['각기둥', 100], ['각뿔대', 50], ['각뿔', 0]].forEach(function (q) {
+      var b = el('button', 'pick mini', q[0]); b.dataset.v = q[1];
+      b.onclick = function () { rng.value = q[1]; setTop(q[1]); };
       krow.appendChild(b);
     });
     panel.appendChild(krow);
-    baseButtons(panel, st, function () { st.layer = 1; st.animT0 = performance.now(); update(); }, 3, 6);
-    panel.appendChild(el('p', 'lead', '<b>"입체도형을 층으로 나누어 보면 파악하기 쉽다!"</b> 한 층씩 쌓아 올리며 개수를 세어 보세요.'));
+    baseButtons(panel, st, function () { st.layer = 1; st.rev = {}; st.animT0 = performance.now(); rebuild(); }, 3, 6);
+    var srow = el('div', 'row', '<span class="lab">윗층 크기</span>'), rng = el('input'); rng.type = 'range'; rng.min = 0; rng.max = 100; rng.value = 100;
+    rng.oninput = function () { setTop(Number(rng.value)); };
+    srow.appendChild(rng); panel.appendChild(srow);
+    panel.appendChild(el('p', 'lead', '<b>1층 → 2층 → 층 사이</b> 순서로 쌓으며, 층마다 꼭짓점·모서리·면을 세어 보세요.'));
     var lrow = el('div', 'row');
-    var lBtns = [0, 1, 2, 3].map(function (lv) {
-      var b = el('button', 'pick mini', '');
+    var lBtns = ['비우기', '1층', '2층', '층 사이'].map(function (t, lv) {
+      var b = el('button', 'pick mini', t);
       b.onclick = function () { st.layer = lv; st.animT0 = performance.now(); update(); };
       lrow.appendChild(b); return b;
     });
-    var bStep = el('button', 'primary', '다음 층 쌓기 →');
-    bStep.onclick = function () { st.layer = st.layer < 3 ? st.layer + 1 : 0; st.animT0 = performance.now(); update(); };
-    lrow.appendChild(bStep);
-    panel.appendChild(lrow);
+    var bStep = el('button', 'primary', '');
+    bStep.onclick = function () { st.layer = st.layer < 3 ? st.layer + 1 : 0; if (st.layer === 0) st.rev = {}; st.animT0 = performance.now(); update(); };
+    lrow.appendChild(bStep); panel.appendChild(lrow);
     var tbl = el('div', 'tabwrap'); panel.appendChild(tbl);
+    var rrow = el('div', 'row'), bAll = el('button', '', '쌓은 칸 모두 열기');
+    bAll.onclick = function () {
+      var keys = allKeys(), on = keys.length && keys.every(function (k) { return st.rev[k]; });
+      keys.forEach(function (k) { st.rev[k] = on ? 0 : 1; }); update();
+    };
+    rrow.appendChild(bAll); panel.appendChild(rrow);
     var tip = el('p', 'note'); panel.appendChild(tip);
-    function layerData(kind, n) {
-      var topV = kind === 'pyramid' ? 1 : n, topE = kind === 'pyramid' ? 0 : n, topF = kind === 'pyramid' ? 0 : 1;
-      return {
-        1: { name: '1층 (밑면)', cls: 'l1', v: n, e: n, f: 1 },
-        2: { name: '2층 (옆면)', cls: 'l2', v: 0, e: n, f: n },
-        3: { name: kind === 'pyramid' ? '3층 (각뿔의 꼭짓점)' : '3층 (윗면)', cls: 'l3', v: topV, e: topE, f: topF }
-      };
+    function kindOf() { return st.s >= 1 ? 'prism' : st.s <= 0 ? 'pyramid' : 'frustum'; }
+    function setTop(v) { st.s = v / 100; rebuild(); }
+    function rebuild() { st.M = layerSolid(st.n, st.s); update(); }
+    function val(m, c) {
+      var n = st.n, pyr = kindOf() === 'pyramid';
+      var V = { vertex: [n, pyr ? 1 : n, 0], edge: [n, pyr ? 0 : n, n], face: [1, pyr ? 0 : 1, n] };
+      return V[m][c - 1];
+    }
+    function allKeys() {
+      var ks = [];
+      ROWS3.forEach(function (r) {
+        COLS3.forEach(function (c) { if (c.k <= st.layer) ks.push(r.m + c.k); });
+        if (st.layer >= 3) ks.push(r.m + 's');
+      });
+      return ks;
     }
     function update() {
-      var n = st.n, kind = st.kind, lv = st.layer, d = layerData(kind, n);
-      tag.textContent = NAMES[n] + KIND[kind];
-      var lbls = ['0. 비우기', '1층: 밑면', '2층: 옆면', kind === 'pyramid' ? '3층: 꼭짓점' : '3층: 윗면'];
-      lBtns.forEach(function (b, i) { b.textContent = lbls[i]; b.classList.toggle('sel', i === lv); });
-      bStep.textContent = lv < 3 ? '다음 층 쌓기 →' : '처음부터 다시 ↺';
-      Array.prototype.forEach.call(krow.children, function (b) { b.classList.toggle('sel', b.dataset.k === kind); });
-      var sv = 0, se = 0, sf = 0;
-      for (var i = 1; i <= lv; i++) { sv += d[i].v; se += d[i].e; sf += d[i].f; }
-      big.innerHTML = lv === 0 ? '준비' : '꼭짓점 <b class="c-vertex">' + sv + '</b> · 모서리 <b class="c-edge">' + se + '</b> · 면 <b class="c-face">' + sf + '</b>';
-      var h = '<table class="ctab layers"><tr><th>층</th><th class="c-vertex">꼭짓점</th><th class="c-edge">모서리</th><th class="c-face">면</th></tr>';
-      [1, 2, 3].forEach(function (i) {
-        var on = lv >= i;
-        h += '<tr><th><span class="layer-badge ' + d[i].cls + '">' + d[i].name + '</span></th>' +
-          '<td>' + (on ? d[i].v : '·') + '</td><td>' + (on ? d[i].e : '·') + '</td><td>' + (on ? d[i].f : '·') + '</td></tr>';
+      var kind = kindOf(), lv = st.layer;
+      tag.textContent = NAMES[st.n] + KIND[kind];
+      Array.prototype.forEach.call(krow.querySelectorAll('button'), function (b) { var v = Number(b.dataset.v); b.classList.toggle('sel', kind === (v >= 100 ? 'prism' : v <= 0 ? 'pyramid' : 'frustum')); });
+      lBtns.forEach(function (b, i) { b.classList.toggle('sel', i === lv); });
+      bStep.textContent = lv < 3 ? '다음 쌓기 →' : '처음부터 ↺';
+      big.innerHTML = lv === 0 ? '' : '<span class="layer-badge ' + COLS3[lv - 1].cls + '">' + COLS3[lv - 1].name + '</span>';
+      var h = '<table class="ctab layers"><tr><th></th>' + COLS3.map(function (c) { return '<th><span class="layer-badge ' + c.cls + '">' + c.name + '</span></th>'; }).join('') + '<th>합계</th></tr>';
+      ROWS3.forEach(function (r) {
+        h += '<tr><th class="c-' + r.m + '">' + r.w + '</th>';
+        var allOpen = true, parts = [];
+        COLS3.forEach(function (c) {
+          var k = r.m + c.k, built = c.k <= lv, on = built && st.rev[k];
+          if (!on) allOpen = false; parts.push(val(r.m, c.k));
+          h += built ? '<td data-k="' + k + '" class="' + (on ? 'rev' : 'q') + '">' + (on ? val(r.m, c.k) : '?') + '</td>' : '<td class="nb">·</td>';
+        });
+        var sk = r.m + 's', sOn = lv >= 3 && st.rev[sk] && allOpen, sum = parts[0] + parts[1] + parts[2];
+        h += lv >= 3 ? '<td data-k="' + sk + '" class="' + (sOn ? 'rev sumc' : 'q') + '">' + (sOn ? parts.join(' + ') + ' = <b>' + sum + '</b>' : '?') + '</td>' : '<td class="nb">·</td>';
+        h += '</tr>';
       });
-      var sumV = lv >= 3 ? (kind === 'pyramid' ? n + ' + 1 = <b>' + (n + 1) + '</b>' : n + ' + ' + n + ' = <b>' + (2 * n) + '</b>') : sv;
-      var sumE = lv >= 3 ? (kind === 'pyramid' ? n + ' + ' + n + ' = <b>' + (2 * n) + '</b>' : n + ' + ' + n + ' + ' + n + ' = <b>' + (3 * n) + '</b>') : se;
-      var sumF = lv >= 3 ? (kind === 'pyramid' ? '1 + ' + n + ' = <b>' + (n + 1) + '</b>' : '1 + ' + n + ' + 1 = <b>' + (n + 2) + '</b>') : sf;
-      h += '<tr class="sumrow"><th>합계</th><td class="c-vertex">' + sumV + '</td><td class="c-edge">' + sumE + '</td><td class="c-face">' + sumF + '</td></tr></table>';
-      tbl.innerHTML = h;
-      tip.textContent = lv === 1 ? '1층(밑면): ' + NAMES[n] + '형이므로 꼭짓점 ' + n + '개, 모서리 ' + n + '개, 면 1개로 시작해요.' :
-        lv === 2 ? '2층(옆면): 아래 꼭짓점에서 올라가는 옆모서리 ' + n + '개와 옆면 ' + n + '개가 추가돼요.' :
-        lv === 3 ? (kind === 'pyramid' ? '3층(꼭짓점): 위에서 한 점으로 만나 꼭짓점 1개만 추가돼요!' : '3층(윗면): 아래층과 똑같이 꼭짓점 ' + n + '개, 모서리 ' + n + '개, 면 1개가 덮여 완성돼요!') :
-        '1층부터 차례대로 쌓아 보세요.';
+      tbl.innerHTML = h + '</table>';
+      var pyr = kind === 'pyramid';
+      tip.innerHTML = lv === 0 ? '1층부터 차례대로 쌓아 보세요.' :
+        lv === 1 ? '<b>1층</b>(아래층): ' + NAMES[st.n] + '형이에요. 꼭짓점·모서리·면이 몇 개일까요?' :
+        lv === 2 ? (pyr ? '<b>2층</b>(위층): 각뿔의 2층은 <b>점 하나</b>예요! 꼭짓점·모서리·면은 몇 개일까요?' : '<b>2층</b>(위층): 1층과 같은 모양이에요' + (kind === 'frustum' ? '(크기만 작아요)' : '') + '. 몇 개씩일까요?') :
+        '<b>층 사이</b>: 1층과 2층을 잇는 모서리와 옆면을 세어 보세요. ' + (pyr ? '모두 2층의 한 점으로 모여요.' : '') +
+        '<br>윗층 크기를 0까지 줄이면 2층이 점 하나가 돼요. 표가 어떻게 바뀌는지 보세요.';
     }
-    update(); S.reset(0.42);
+    tbl.addEventListener('click', function (e) {
+      var td = e.target.closest('td[data-k]'); if (!td) return;
+      var k = td.dataset.k;
+      if (/s$/.test(k)) { var m = k.slice(0, -1); if (![1, 2, 3].every(function (c) { return st.rev[m + c]; })) { anim(td, 'pop'); return; } }
+      st.rev[k] = st.rev[k] ? 0 : 1; update();
+    });
+    rebuild(); S.reset(0.42);
     return {
-      frame: function (dt, col) { if (S.tick(dt)) drawLayers(S.cv, st.kind, st.n, st.layer, st.animT0, S.mat, 0, 0.4, col); },
+      frame: function (dt, col) { if (S.tick(dt)) drawLayers(S.cv, st.M, st.layer, st.animT0, S.mat, 0, 0.4, col); },
       primary: function () { bStep.onclick(); }
     };
   }
@@ -1461,7 +1472,7 @@ button.cnt.vertex { border-color: var(--vertex); color: var(--vertex); } button.
     { sec: 1, title: '각뿔을 잘라 각뿔대 만들기', mount: sceneCut },
     { sec: 1, title: '각기둥 · 각뿔대 · 각뿔', mount: sceneFamily },
     { sec: 2, title: '면 · 모서리 · 꼭짓점', mount: sceneTerms },
-    { sec: 2, title: '층으로 나누어 세기', mount: sceneLayers },
+    { sec: 2, title: '층마다 세기', mount: sceneLayers },
     { sec: 2, title: '개수 세고 규칙 찾기', mount: sceneTable }
   ];
   var cur = -1, active = null;
