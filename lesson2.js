@@ -69,11 +69,13 @@ function solidOf(key) { if (!SOLID_CACHE[key]) { var D = SOLID_DEF[key]; SOLID_C
 
 // ================= 층 나누기 (층이 3개, 4개여도) =================
 // 단계: 1층 → 2층 → 1·2층 사이 → 3층 → 2·3층 사이 → … (아래에서 위로 쌓기)
-function levelsOf(M) {
-  if (M._LV) return M._LV;
+function levelsOf(M, lf) {   // lf: 선 먼저 (1층 → 층 사이 선 → 2층 → …)
+  var ck = lf ? '_LVf' : '_LV';
+  if (M[ck]) return M[ck];
   var ys = []; M.V.forEach(function (v) { if (ys.indexOf(v[1]) < 0) ys.push(v[1]); }); ys.sort(function (a, b) { return a - b; });
   var K = ys.length, lvl = M.V.map(function (v) { return ys.indexOf(v[1]) + 1; });
-  var stepL = function (k) { return k === 1 ? 1 : 2 * k - 2; }, stepB = function (k) { return 2 * k + 1; };   // k층, k·(k+1)층 사이
+  var stepL = lf ? function (k) { return 2 * k - 1; } : function (k) { return k === 1 ? 1 : 2 * k - 2; };   // k층
+  var stepB = lf ? function (k) { return 2 * k; } : function (k) { return 2 * k + 1; };   // k·(k+1)층 사이
   var vL = lvl.map(stepL);
   var eL = M.E.map(function (e) { var a = lvl[e.a], b = lvl[e.b]; return a === b ? stepL(a) : stepB(Math.min(a, b)); });
   var fL = M.F.map(function (f, i) {
@@ -81,9 +83,9 @@ function levelsOf(M) {
     if (ls.every(function (x) { return x === ls[0]; })) return stepL(ls[0]);
     return Math.max.apply(null, M.FE[i].map(function (ei) { return eL[ei]; }));   // 모서리가 다 생겨야 면이 닫힌다
   });
-  var max = stepB(K - 1), steps = [], col = {};
+  var max = lf ? stepL(K) : stepB(K - 1), steps = [], col = {};
   for (var s = 1; s <= max; s++) {
-    var isB = s >= 3 && s % 2 === 1, k = isB ? (s - 1) / 2 : (s === 1 ? 1 : s / 2 + 1);
+    var isB = lf ? s % 2 === 0 : s >= 3 && s % 2 === 1, k = lf ? (isB ? s / 2 : (s + 1) / 2) : isB ? (s - 1) / 2 : (s === 1 ? 1 : s / 2 + 1);
     var nV = vL.filter(function (x) { return x === s; }).length, nE = eL.filter(function (x) { return x === s; }).length, nF = fL.filter(function (x) { return x === s; }).length;
     var shape = isB ? '' : nV === 1 ? '점' : nE === 0 ? '점 ' + nV + '개' : NAMES[nV] ? NAMES[nV] + '형' : nV + '각형';
     steps.push({ s: s, between: isB, name: isB ? k + '·' + (k + 1) + '층 사이' : k + '층', shape: shape, v: nV, e: nE, f: nF, cls: isB ? 'l2' : (k % 2 ? 'l1' : 'l3') });
@@ -91,8 +93,8 @@ function levelsOf(M) {
   }
   // 층 사이를 엇갈려 잇는지 (지그재그): 사이 모서리 수가 두 층의 점 수보다 많으면
   var lvCount = []; for (var k2 = 1; k2 <= K; k2++) lvCount[k2] = lvl.filter(function (x) { return x === k2; }).length;
-  steps.forEach(function (st) { if (st.between) { var k3 = (st.s - 1) / 2, a = lvCount[k3], b = lvCount[k3 + 1]; st.zig = a > 1 && b > 1 && st.e > Math.max(a, b); } });
-  return (M._LV = { vL: vL, eL: eL, fL: fL, col: col, max: max, steps: steps, K: K, ys: ys, lvl: lvl });
+  steps.forEach(function (st) { if (st.between) { var k3 = lf ? st.s / 2 : (st.s - 1) / 2, a = lvCount[k3], b = lvCount[k3 + 1]; st.zig = a > 1 && b > 1 && st.e > Math.max(a, b); } });
+  return (M[ck] = { vL: vL, eL: eL, fL: fL, col: col, max: max, steps: steps, K: K, ys: ys, lvl: lvl });
 }
 
 // ================= 꼭짓점 하나에 모인 면 보기 =================
@@ -157,8 +159,8 @@ function sceneLevels(cfg) {
     panel.appendChild(krow);
     if (cfg.lead) panel.appendChild(el('p', 'lead', cfg.lead));
     var lrow = el('div', 'row'), bStep = el('button', 'primary', ''), bAll = el('button', '', '모두 쌓기');
-    bStep.onclick = function () { var LV = levelsOf(solidOf(st.k)); st.step = st.step < LV.max ? st.step + 1 : 1; if (st.step === 1) st.rev = {}; st.animT0 = performance.now(); upd(); };
-    bAll.onclick = function () { st.step = levelsOf(solidOf(st.k)).max; st.animT0 = 0; upd(); };
+    bStep.onclick = function () { var LV = levelsOf(solidOf(st.k), cfg.lf); st.step = st.step < LV.max ? st.step + 1 : 1; if (st.step === 1) st.rev = {}; st.animT0 = performance.now(); upd(); };
+    bAll.onclick = function () { st.step = levelsOf(solidOf(st.k), cfg.lf).max; st.animT0 = 0; upd(); };
     lrow.appendChild(bStep); lrow.appendChild(bAll); panel.appendChild(lrow);
     var tbl = el('div', 'tabwrap'); panel.appendChild(tbl);
     var note = el('p', 'callout'); note.hidden = true; panel.appendChild(note);
@@ -166,7 +168,7 @@ function sceneLevels(cfg) {
     if (cfg.foot) panel.appendChild(el('p', 'note', cfg.foot));
     function load(k) { st.k = k; st.step = 1; st.rev = {}; st.animT0 = performance.now(); Object.keys(kBtns).forEach(function (x) { kBtns[x].classList.toggle('sel', x === k); }); tag.textContent = SOLID_DEF[k].name; S.reset(0.38); upd(); }
     function upd() {
-      var LV = levelsOf(solidOf(st.k)), cur = LV.steps[st.step - 1];
+      var LV = levelsOf(solidOf(st.k), cfg.lf), cur = LV.steps[st.step - 1];
       bStep.textContent = st.step < LV.max ? '다음 쌓기 → (' + LV.steps[st.step].name + ')' : '처음부터 ↺';
       big.innerHTML = '<span class="layer-badge ' + cur.cls + '">' + cur.name + (cur.shape ? ' · ' + cur.shape : '') + '</span>';
       var h = '<table class="ctab layers"><tr><th></th><th class="c-vertex">꼭짓점</th><th class="c-edge">모서리</th><th class="c-face">면</th></tr>', sum = { v: [], e: [], f: [] }, allOpen = true;
@@ -183,10 +185,10 @@ function sceneLevels(cfg) {
       if (zig) note.innerHTML = '<b>' + zig.name + '</b>: 두 층의 점이 <b>엇갈려</b> 있어서 지그재그로 이어져요. 그래서 모서리가 ' + (zig.e / 2) + '개가 아니라 <b>' + zig.e + '개</b>예요.';
     }
     tbl.addEventListener('click', function (e) { var td = e.target.closest('td[data-k]'); if (!td) return; st.rev[td.dataset.k] = st.rev[td.dataset.k] ? 0 : 1; upd(); });
-    bRev.onclick = function () { var LV = levelsOf(solidOf(st.k)), ks = []; LV.steps.forEach(function (x) { if (x.s <= st.step) ['v', 'e', 'f'].forEach(function (m) { ks.push(x.s + m); }); }); var on = ks.every(function (k) { return st.rev[k]; }); ks.forEach(function (k) { st.rev[k] = on ? 0 : 1; }); upd(); };
+    bRev.onclick = function () { var LV = levelsOf(solidOf(st.k), cfg.lf), ks = []; LV.steps.forEach(function (x) { if (x.s <= st.step) ['v', 'e', 'f'].forEach(function (m) { ks.push(x.s + m); }); }); var on = ks.every(function (k) { return st.rev[k]; }); ks.forEach(function (k) { st.rev[k] = on ? 0 : 1; }); upd(); };
     load(st.k);
     return {
-      frame: function (dt, col) { if (S.tick(dt)) { var M = solidOf(st.k); drawLayersG(S.cv, M, levelsOf(M), st.step, st.animT0, S.mat, 0, 0.4, col, false); } },
+      frame: function (dt, col) { if (S.tick(dt)) { var M = solidOf(st.k); drawLayersG(S.cv, M, levelsOf(M, cfg.lf), st.step, st.animT0, S.mat, 0, 0.4, col, false); } },
       primary: function () { bStep.onclick(); }
     };
   };
@@ -336,7 +338,7 @@ function drawBuild(cv, M, BD, si, t, mat, view, col, ghost) {
 }
 
 function sceneBuild(main) {
-  main.appendChild(el('div', 'scene-head', '<h2>차곡차곡 쌓아 만들기 — 면을 접어 올리면 다음 층이 생겨요</h2>'));
+  main.appendChild(el('div', 'scene-head', '<h2>접어서 쌓기 — 면을 접어 올리면 다음 층이 생겨요</h2>'));
   var two = el('div', 'two'); main.appendChild(two);
   var S = Stage(two), big = S.add('big'), tag = S.add('tag');
   var panel = el('div', 'panel'); two.appendChild(panel);
@@ -755,7 +757,8 @@ var SCENES = [
   { sec: 1, title: '정다면체의 조건 예측 · 확인', mount: sceneConditions, ws: '주요개념' },
   { sec: 1, title: '정다면체의 뜻', mount: sceneDefine2, ws: '주요개념' },
   { sec: 2, title: '한 꼭짓점에 모인 면', mount: sceneVertex, ws: '생각익히기' },
-  { sec: 2, title: '차곡차곡 쌓아 만들기', mount: sceneBuild, ws: '생각익히기' },
+  { sec: 2, title: '선을 이어 쌓기', mount: sceneLevels({ title: '선을 이어 쌓기 — 1층에서 선을 올리면 다음 층이 생겨요', shapes: REG5, lf: true, lead: '<b>1층</b>을 놓고 → <b>층 사이 선</b>을 위로 그으면 → 선 끝에 <b>다음 층</b>이 생겨요. 정이십면체는 점 · 오각형 · 오각형 · 점으로 쌓여요.' }), ws: '생각익히기' },
+  { sec: 2, title: '접어서 쌓기', mount: sceneBuild, ws: '생각익히기' },
   { sec: 2, title: '정다면체 정리하기', mount: sceneTable2, ws: '정리' },
   { sec: 3, title: '쌍뿔 가족 비교', mount: sceneBipyr, ws: '생각 넓히기' },
   { sec: 4, title: '도전: 정다각형 모으기', mount: sceneFan, ws: '도전문제' },
