@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>
+<title>정다면체 2차시</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jua&family=Noto+Sans+KR:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="lesson.css">
+</head>
+<body>
+<header id="hd">
+  <div class="brand">정다면체 2차시<small><a href="index.html">← 1차시</a> · ← → 키로 넘기기</small></div>
+  <nav id="secs" aria-label="단원"></nav>
+  <nav id="dots" aria-label="장면"></nav>
+</header>
+<main id="scene"></main>
+<footer id="ft">
+  <button type="button" id="prev">← 이전</button>
+  <span id="stitle"></span>
+  <label class="eng3d" title="three.js로 그리기 (시범). 각뿔 자르기의 칼날, 각뿔대의 늘린 모서리, 카드 작은 그림은 2D로 그려요"><input type="checkbox" id="eng3d"> 3D 엔진 <small>시범</small></label>
+  <span id="eng3d-msg" class="eng3d-msg" hidden>3D 엔진은 인터넷 주소(GitHub Pages)로 열 때만 돼요</span>
+  <button type="button" id="next" class="primary">다음 →</button>
+</footer>
+<script src="core.js"></script>
+<script src="lesson2.js"></script>
+</body>
+</html>
